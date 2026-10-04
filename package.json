@@ -8,7 +8,8 @@
     "seed": "node seed.mjs",
     "serve": "npx serve -l 5000 public",
     "e2e": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e.mjs\"",
-    "test:migrate": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/test-migrate.mjs\""
+    "test:migrate": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/test-migrate.mjs\"",
+    "e2e:trial": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-trial.mjs\""
   },
   "keywords": [],
   "author": "",

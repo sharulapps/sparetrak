@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// SpareTrack multi-tenant rules (prototype).
+// SpareTrack multi-tenant rules.
 //
 // Every tenant's data lives under tenants/{tid}/...  A user can only touch a
 // tenant they are an ACTIVE member of, and only while that tenant is ACTIVE.
@@ -13,6 +13,13 @@ rules_version = '2';
 //   approve requests         : admin, manager, engineer
 //   manage users             : admin, manager
 //   technician               : read + submit approval requests only
+//
+// Plan limits (free trial: 3 users, 10 parts) are enforced here too:
+//   users  — tenants/{tid}.userCount must go up by exactly 1 in the same batch
+//            as a new member, and may not exceed maxUsers
+//   parts  — when maxParts > 0, part ids must be slot-1 .. slot-<maxParts>,
+//            so more than maxParts parts cannot exist
+// Anyone signed in may create ONE free-trial company for themselves (self sign-up).
 
 service cloud.firestore {
   match /databases/{db}/documents {
@@ -48,6 +55,38 @@ service cloud.firestore {
     function canApprove(tid)    { return hasRole(tid, ['admin','manager','engineer']); }
     function canManageUsers(tid){ return hasRole(tid, ['admin','manager']); }
 
+    function tenantPath(tid) { return /databases/$(db)/documents/tenants/$(tid); }
+
+    // ── Plan limits ─────────────────────────────────
+    function partIdAllowed(tid, id) {
+      let maxParts = get(tenantPath(tid)).data.get('maxParts', 0);
+      return maxParts == 0
+        || (id.matches('slot-[1-9][0-9]*') && int(id.split('-')[1]) <= maxParts);
+    }
+    // A new member must come with userCount + 1 in the same batch
+    function userCountBumped(tid) {
+      return getAfter(tenantPath(tid)).data.get('userCount', 0)
+          == get(tenantPath(tid)).data.get('userCount', 0) + 1;
+    }
+
+    // ── Self sign-up: one free-trial company per account ──
+    // The tenant doc, the caller's admin member doc and their userTenants doc
+    // must be written together in one batch, with the fixed trial limits.
+    function isTrialSignup(tid) {
+      let uid = request.auth.uid;
+      let t = getAfter(tenantPath(tid)).data;
+      return signedIn()
+        && !exists(/databases/$(db)/documents/userTenants/$(uid))
+        && !exists(tenantPath(tid))
+        && t.keys().hasOnly(['name','status','plan','maxUsers','maxParts','userCount','createdAt','createdBy','settings'])
+        && t.name is string && t.name.size() > 0 && t.name.size() <= 80
+        && t.status == 'active' && t.plan == 'trial'
+        && t.maxUsers == 3 && t.maxParts == 10 && t.userCount == 1
+        && t.createdBy == uid
+        && getAfter(/databases/$(db)/documents/userTenants/$(uid)).data.tenantId == tid
+        && getAfter(/databases/$(db)/documents/tenants/$(tid)/members/$(uid)).data.role == 'admin';
+    }
+
     // ── Platform owner ─────────────────────────────
     // Written from the Firebase console only.
     match /platformAdmins/{uid} {
@@ -62,19 +101,28 @@ service cloud.firestore {
       // by another tenant's admin.
       allow create: if isPlatformAdmin()
         || (canManageUsers(request.resource.data.tenantId)
-            && request.resource.data.keys().hasOnly(['tenantId']));
+            && request.resource.data.keys().hasOnly(['tenantId']))
+        || (uid == request.auth.uid
+            && request.resource.data.keys().hasOnly(['tenantId'])
+            && isTrialSignup(request.resource.data.tenantId));
       allow update, delete: if isPlatformAdmin();
     }
 
     // ── Tenants ─────────────────────────────────────
     match /tenants/{tid} {
       allow read: if isMember(tid) || isPlatformAdmin();
-      allow create, delete: if isPlatformAdmin();
-      // Tenant admins may edit their own settings, but not plan/status/limits.
+      allow create: if isPlatformAdmin() || isTrialSignup(tid);
+      allow delete: if isPlatformAdmin();
+      // Tenant admins may edit their own settings, but not plan/status/limits/counters.
       allow update: if isPlatformAdmin()
         || (hasRole(tid, ['admin'])
             && !request.resource.data.diff(resource.data).affectedKeys()
-                 .hasAny(['status','plan','maxUsers']));
+                 .hasAny(['status','plan','maxUsers','maxParts','userCount','createdBy']))
+        // userCount may only go up by one, within maxUsers (paired with a new member)
+        || (canManageUsers(tid)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userCount'])
+            && request.resource.data.userCount == resource.data.get('userCount', 0) + 1
+            && request.resource.data.userCount <= resource.data.get('maxUsers', 1000000));
 
       match /members/{uid} {
         // Users can always read their own record, so the app can say "disabled" clearly.
@@ -82,7 +130,12 @@ service cloud.firestore {
         allow create: if isPlatformAdmin()
           || (canManageUsers(tid)
               && validRole(request.resource.data.role)
-              && (hasRole(tid, ['admin']) || request.resource.data.role != 'admin'));
+              && (hasRole(tid, ['admin']) || request.resource.data.role != 'admin')
+              && userCountBumped(tid))
+          || (uid == request.auth.uid
+              && request.resource.data.role == 'admin'
+              && request.resource.data.status == 'active'
+              && isTrialSignup(tid));
         // Managers cannot promote anyone to admin or edit an admin; nobody
         // can change their own role or disable themselves.
         allow update: if isPlatformAdmin()
@@ -96,7 +149,8 @@ service cloud.firestore {
 
       match /parts/{id} {
         allow read: if isMember(tid);
-        allow create, delete: if canEditParts(tid);
+        allow create: if canEditParts(tid) && partIdAllowed(tid, id);
+        allow delete: if canEditParts(tid);
         allow update: if canMoveStock(tid);
       }
 

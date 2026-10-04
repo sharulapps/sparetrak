@@ -59,7 +59,7 @@ await env.withSecurityRulesDisabled(async ctx => {
   const now = Date.now();
   for (const t of TENANTS) {
     await setDoc(doc(db, 'tenants', t.id), {
-      name: t.name, status: 'active', plan: t.plan, maxUsers: t.maxUsers, createdAt: now, createdBy: ownerUid,
+      name: t.name, status: 'active', plan: t.plan, maxUsers: t.maxUsers, maxParts: 0, userCount: t.users.length, createdAt: now, createdBy: ownerUid,
       settings: { ntfyTopic: 'st-' + t.id + '-' + Math.random().toString(36).slice(2, 8) },
     });
     for (const [name, email, role] of t.users) {

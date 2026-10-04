@@ -117,7 +117,7 @@ td{padding:12px 10px;border-bottom:1px solid var(--border);vertical-align:middle
     <div class="grid">
       <div class="fg" style="grid-column:1/-1"><label>Company Name *</label><input id="c-name" placeholder="e.g. Syarikat Contoh Sdn Bhd" oninput="autoId()"></div>
       <div class="fg"><label>Company ID *</label><input id="c-id" placeholder="contoh" oninput="this.dataset.touched=1"><div class="hint">Lowercase letters, numbers, dashes. Cannot be changed later.</div></div>
-      <div class="fg"><label>Plan</label><select id="c-plan"><option value="starter">Starter</option><option value="pro" selected>Pro</option><option value="business">Business</option></select></div>
+      <div class="fg"><label>Plan</label><select id="c-plan"><option value="trial">Free trial (3 users, 10 parts)</option><option value="starter">Starter</option><option value="pro" selected>Pro</option><option value="business">Business</option></select></div>
       <div class="fg"><label>Max Users</label><input id="c-max" type="number" min="1" value="20"></div>
       <div class="fg"><label>ntfy Topic</label><input id="c-ntfy" placeholder="auto-generated"><div class="hint">Random by default, so other people cannot guess it.</div></div>
     </div>
@@ -208,14 +208,22 @@ function render(){
   if(!tenants.length){rows.innerHTML='<tr><td colspan="6" class="empty">No companies yet. Click “New Company”.</td></tr>';return;}
   rows.innerHTML=tenants.map(t=>`<tr>
     <td><div class="tname">${esc(t.name)}</div><div class="tid">${esc(t.id)}</div></td>
-    <td style="text-transform:capitalize">${esc(t.plan||'-')}</td>
+    <td><span style="text-transform:capitalize">${t.plan==='trial'?'Free trial':esc(t.plan||'-')}</span>
+      <div style="font-size:11px;color:var(--text3)">${Number(t.maxParts)?esc(t.maxParts)+' parts max':'Unlimited parts'}${t.createdBy&&t.createdBy!==auth.currentUser.uid?' · self sign-up':''}</div></td>
     <td>${t.activeUsers}${t.users!==t.activeUsers?` <span style="color:var(--text3)">(+${t.users-t.activeUsers} disabled)</span>`:''} / ${esc(t.maxUsers||'-')}</td>
     <td><span class="pill ${t.status==='active'?'active':'suspended'}">${esc(t.status)}</span></td>
     <td style="color:var(--text3);font-size:12px">${t.createdAt?new Date(t.createdAt).toLocaleDateString('en-MY'):'-'}</td>
-    <td style="text-align:right">${t.status==='active'
+    <td style="text-align:right;white-space:nowrap">${t.plan==='trial'?`<button class="btn ok" onclick="upgrade('${esc(t.id)}')">Upgrade</button> `:''}${t.status==='active'
       ?`<button class="btn danger" onclick="setStatus('${esc(t.id)}','suspended')">Suspend</button>`
       :`<button class="btn ok" onclick="setStatus('${esc(t.id)}','active')">Activate</button>`}</td>
   </tr>`).join('');
+}
+async function upgrade(id){
+  const t=tenants.find(x=>x.id===id);
+  if(!confirm('Upgrade '+t.name+' to Pro?\n\nUsers: up to 20 · Parts: unlimited'))return;
+  await F.updateDoc(F.doc(db,'tenants',id),{plan:'pro',maxUsers:20,maxParts:0});
+  toast(t.name+' upgraded to Pro');
+  loadTenants();
 }
 async function setStatus(id,status){
   const t=tenants.find(x=>x.id===id);
@@ -258,7 +266,8 @@ async function createTenant(){
     await A.signOut(secAuth);
     const now=Date.now(), owner=auth.currentUser.uid;
     const b=F.writeBatch(db);
-    b.set(F.doc(db,'tenants',id),{name,status:'active',plan,maxUsers,createdAt:now,createdBy:owner,settings:{ntfyTopic:ntfy}});
+    const limits=plan==='trial'?{maxUsers:3,maxParts:10}:{maxUsers,maxParts:0};
+    b.set(F.doc(db,'tenants',id),{name,status:'active',plan,...limits,userCount:1,createdAt:now,createdBy:owner,settings:{ntfyTopic:ntfy}});
     b.set(F.doc(db,'tenants',id,'members',uid),{name:aname,email:aemail,role:'admin',status:'active',createdAt:now,createdBy:owner});
     b.set(F.doc(db,'userTenants',uid),{tenantId:id});
     await b.commit();

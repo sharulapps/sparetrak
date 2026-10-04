@@ -109,10 +109,10 @@ async function exportOld() {
 function planWrites(data) {
   const ops = [];
   const now = Date.now();
-  ops.push({ path: `tenants/${TENANT}`, data: { name: NAME, status: 'active', plan: 'internal', maxUsers: 1000, createdAt: now, migratedFrom: 'single-tenant', settings: { ntfyTopic: NTFY } } });
-
   const users = new Map(data.collections.users.map(u => [u.id, dec(u.data)]));
   for (const a of data.authUsers || []) if (!users.has(a.uid)) users.set(a.uid, { email: a.email, name: a.email, role: 'technician', addedBy: 'migration' });
+  // No part limit (maxParts 0); userCount starts at the number of migrated members
+  ops.push({ path: `tenants/${TENANT}`, data: { name: NAME, status: 'active', plan: 'internal', maxUsers: 1000, maxParts: 0, userCount: users.size, createdAt: now, migratedFrom: 'single-tenant', settings: { ntfyTopic: NTFY } } });
   for (const [uid, u] of users) {
     const role = ROLES.includes(u.role) ? u.role : 'technician';
     const authDisabled = (data.authUsers || []).some(a => a.uid === uid && a.disabled);

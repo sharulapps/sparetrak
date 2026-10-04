@@ -7,6 +7,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc, collection,
+  writeBatch, increment,
 } from 'firebase/firestore';
 
 let env;
@@ -37,6 +38,24 @@ beforeEach(async () => {
 });
 
 const as = uid => env.authenticatedContext(uid).firestore();
+
+// Add a member the way the app does: member doc + userTenants + userCount+1 in one batch
+function addMember(db, tid, uid, role = 'technician', { bump = true, mapping = true } = {}) {
+  const b = writeBatch(db);
+  b.set(doc(db, `tenants/${tid}/members/${uid}`), { role, status: 'active', name: uid });
+  if (mapping) b.set(doc(db, `userTenants/${uid}`), { tenantId: tid });
+  if (bump) b.update(doc(db, `tenants/${tid}`), { userCount: increment(1) });
+  return b.commit();
+}
+// Self sign-up batch, as index.html's startTrial() writes it
+function trialSignup(db, uid, tid, overrides = {}) {
+  const b = writeBatch(db);
+  b.set(doc(db, `tenants/${tid}`), { name: 'Trial Co', status: 'active', plan: 'trial', maxUsers: 3, maxParts: 10,
+    userCount: 1, createdAt: 1, createdBy: uid, settings: { ntfyTopic: 'st-x-abc123' }, ...overrides });
+  b.set(doc(db, `tenants/${tid}/members/${uid}`), { role: 'admin', status: 'active', name: 'Owner', email: uid + '@x.test' });
+  b.set(doc(db, `userTenants/${uid}`), { tenantId: tid });
+  return b.commit();
+}
 
 // ── Isolation ───────────────────────────────────
 test('member reads own tenant parts', async () => {
@@ -87,20 +106,21 @@ test('only tenant admin can edit or delete transactions (audit trail)', async ()
 
 // ── Tenant admin manages own users ──────────────
 test('tenant admin adds a user to own tenant', async () => {
-  const db = as('mnsb-admin');
-  await assertSucceeds(setDoc(doc(db, 'userTenants/new-user'), { tenantId: 'mnsb' }));
-  await assertSucceeds(setDoc(doc(db, 'tenants/mnsb/members/new-user'), { role: 'technician', status: 'active', name: 'New' }));
+  await assertSucceeds(addMember(as('mnsb-admin'), 'mnsb', 'new-user'));
+});
+test('adding a member without bumping userCount is refused', async () => {
+  await assertFails(addMember(as('mnsb-admin'), 'mnsb', 'sneaky', 'technician', { bump: false }));
 });
 test('tenant admin CANNOT add a user to another tenant', async () => {
   const db = as('mnsb-admin');
   await assertFails(setDoc(doc(db, 'userTenants/new-user'), { tenantId: 'acme' }));
-  await assertFails(setDoc(doc(db, 'tenants/acme/members/new-user'), { role: 'technician', status: 'active' }));
+  await assertFails(addMember(db, 'acme', 'new-user'));
 });
 test('tenant admin CANNOT take over a user that already belongs to another tenant', async () => {
   await assertFails(setDoc(doc(as('mnsb-admin'), 'userTenants/acme-tech'), { tenantId: 'mnsb' }));
 });
 test('manager cannot create or promote to admin', async () => {
-  await assertFails(setDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/members/u2'), { role: 'admin', status: 'active' }));
+  await assertFails(addMember(as('mnsb-mgr'), 'mnsb', 'u2', 'admin'));
   await assertFails(updateDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/members/mnsb-tech'), { role: 'admin' }));
   await assertSucceeds(updateDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/members/mnsb-tech'), { role: 'engineer' }));
 });
@@ -109,7 +129,7 @@ test('nobody can change their own role', async () => {
   await assertFails(updateDoc(doc(as('mnsb-admin'), 'tenants/mnsb/members/mnsb-admin'), { role: 'technician' }));
 });
 test('technician cannot manage users', async () => {
-  await assertFails(setDoc(doc(as('mnsb-tech'), 'tenants/mnsb/members/u3'), { role: 'technician', status: 'active' }));
+  await assertFails(addMember(as('mnsb-tech'), 'mnsb', 'u3'));
 });
 
 // ── Disable / suspend ───────────────────────────
@@ -146,4 +166,67 @@ test('platform owner creates tenants; tenant admins cannot', async () => {
 });
 test('nobody can make themselves platform owner', async () => {
   await assertFails(setDoc(doc(as('mnsb-admin'), 'platformAdmins/mnsb-admin'), { name: 'me' }));
+});
+
+// ── Free trial: self sign-up and plan limits ─────
+test('anyone signed in can start one free trial and becomes its admin', async () => {
+  await assertSucceeds(trialSignup(as('newbie'), 'newbie', 'newco-1a2b'));
+  await assertSucceeds(getDocs(collection(as('newbie'), 'tenants/newco-1a2b/parts')));
+  await assertFails(getDocs(collection(as('newbie'), 'tenants/mnsb/parts')));
+});
+test('trial sign-up must use the fixed trial limits', async () => {
+  await assertFails(trialSignup(as('greedy'), 'greedy', 'big-co', { maxParts: 100000 }));
+  await assertFails(trialSignup(as('greedy'), 'greedy', 'big-co', { maxUsers: 50 }));
+  await assertFails(trialSignup(as('greedy'), 'greedy', 'big-co', { plan: 'business' }));
+  await assertFails(trialSignup(as('greedy'), 'greedy', 'big-co', { createdBy: 'someone-else' }));
+});
+test('one free trial per account; existing members cannot start another', async () => {
+  await assertSucceeds(trialSignup(as('newbie'), 'newbie', 'first-co'));
+  await assertFails(trialSignup(as('newbie'), 'newbie', 'second-co'));
+  await assertFails(trialSignup(as('mnsb-tech'), 'mnsb-tech', 'tech-co'));
+});
+test('sign-up cannot take over an existing company', async () => {
+  await assertFails(trialSignup(as('attacker'), 'attacker', 'mnsb'));
+  await assertFails(setDoc(doc(as('attacker'), 'tenants/mnsb/members/attacker'), { role: 'admin', status: 'active' }));
+  await assertFails(setDoc(doc(as('attacker'), 'userTenants/attacker'), { tenantId: 'mnsb' }));
+});
+test('signed-out visitors cannot sign up', async () => {
+  const db = env.unauthenticatedContext().firestore();
+  await assertFails(setDoc(doc(db, 'tenants/anon-co'), { name: 'x', status: 'active', plan: 'trial', maxUsers: 3, maxParts: 10, userCount: 1, createdBy: 'x' }));
+});
+test('trial: 3 users max', async () => {
+  await assertSucceeds(trialSignup(as('owner1'), 'owner1', 'trial-co'));
+  const db = as('owner1');
+  await assertSucceeds(addMember(db, 'trial-co', 'tu2'));
+  await assertSucceeds(addMember(db, 'trial-co', 'tu3'));
+  await assertFails(addMember(db, 'trial-co', 'tu4'));
+});
+test('trial admin cannot raise their own limits or reset the counter', async () => {
+  await assertSucceeds(trialSignup(as('owner1'), 'owner1', 'trial-co'));
+  const db = as('owner1');
+  await assertFails(updateDoc(doc(db, 'tenants/trial-co'), { maxParts: 999 }));
+  await assertFails(updateDoc(doc(db, 'tenants/trial-co'), { maxUsers: 99 }));
+  await assertFails(updateDoc(doc(db, 'tenants/trial-co'), { userCount: 0 }));
+  await assertFails(updateDoc(doc(db, 'tenants/trial-co'), { plan: 'pro' }));
+  await assertSucceeds(updateDoc(doc(db, 'tenants/trial-co'), { name: 'Renamed Co' }));
+});
+test('trial: parts only in slot-1..slot-10, so an 11th part cannot exist', async () => {
+  await assertSucceeds(trialSignup(as('owner1'), 'owner1', 'trial-co'));
+  const db = as('owner1');
+  for (let i = 1; i <= 10; i++) await assertSucceeds(setDoc(doc(db, `tenants/trial-co/parts/slot-${i}`), { name: 'p' + i, qty: 1 }));
+  await assertFails(setDoc(doc(db, 'tenants/trial-co/parts/slot-11'), { name: 'p11', qty: 1 }));
+  await assertFails(addDoc(collection(db, 'tenants/trial-co/parts'), { name: 'random id', qty: 1 }));
+  await assertFails(setDoc(doc(db, 'tenants/trial-co/parts/slot-0'), { name: 'p0', qty: 1 }));
+  // editing an existing slot is still fine; deleting frees it for reuse
+  await assertSucceeds(updateDoc(doc(db, 'tenants/trial-co/parts/slot-3'), { qty: 5 }));
+  await assertSucceeds(deleteDoc(doc(db, 'tenants/trial-co/parts/slot-3')));
+  await assertSucceeds(setDoc(doc(db, 'tenants/trial-co/parts/slot-3'), { name: 'reused', qty: 1 }));
+});
+test('companies without a part limit keep normal ids', async () => {
+  await assertSucceeds(addDoc(collection(as('mnsb-admin'), 'tenants/mnsb/parts'), { name: 'any id', qty: 1 }));
+});
+test('platform owner upgrades a trial by lifting the limits', async () => {
+  await assertSucceeds(trialSignup(as('owner1'), 'owner1', 'trial-co'));
+  await assertSucceeds(updateDoc(doc(as('owner'), 'tenants/trial-co'), { plan: 'pro', maxUsers: 20, maxParts: 0 }));
+  await assertSucceeds(addDoc(collection(as('owner1'), 'tenants/trial-co/parts'), { name: 'unlimited now', qty: 1 }));
 });
