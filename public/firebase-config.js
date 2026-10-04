@@ -10,12 +10,12 @@
 // firestore.rules. On localhost the pages ignore this and use the Firebase emulators.
 // ═══════════════════════════════════════════════════════════════
 const FIREBASE_CONFIG = {
-  apiKey:            "PASTE_YOUR_API_KEY",
-  authDomain:        "your-project-id.firebaseapp.com",
-  projectId:         "your-project-id",
-  storageBucket:     "your-project-id.firebasestorage.app",
-  messagingSenderId: "000000000000",
-  appId:             "1:000000000000:web:0000000000000000000000"
+  apiKey:            "AIzaSyAFnDCWRdz2N_-FymnX6-DhAs3HEVtuJ2c",
+  authDomain:        "sparetrak.firebaseapp.com",
+  projectId:         "sparetrak",
+  storageBucket:     "sparetrak.firebasestorage.app",
+  messagingSenderId: "536051855170",
+  appId:             "1:536051855170:web:78337492cf61fc2b0e62db"
 };
 
 const FIREBASE_CONFIG_READY = !/^PASTE_/.test(FIREBASE_CONFIG.apiKey);
