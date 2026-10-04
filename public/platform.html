@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpareTrack Platform</title>
+<meta name="robots" content="noindex">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#0A1628; --navy2:#0D1F3C; --gold:#C9A24E;
+  --bg:#fff; --bg2:#F4F7FC; --text:#0A1628; --text2:#3D5278; --text3:#7A8FAD;
+  --border:rgba(27,79,216,.10); --border2:rgba(27,79,216,.18);
+  --green:#059669; --green-bg:#ECFDF5; --green-t:#065F46;
+  --red:#DC2626; --red-bg:#FEF2F2; --red-t:#991B1B;
+  --radius:10px;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+}
+body{
+  min-height:100vh; color:var(--text); font-size:14px; -webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(59,130,246,.18), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(217,184,108,.10), transparent 55%),
+    linear-gradient(160deg,#06101F 0%,#0A1A33 45%,#0C2142 100%) fixed;
+  padding:28px 16px;
+}
+.wrap{max-width:1100px;margin:0 auto;background:var(--bg);border-radius:24px;box-shadow:0 30px 80px rgba(0,0,0,.45);overflow:hidden}
+.head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 28px;border-bottom:1px solid var(--border)}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-icon{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#0D1F3C,#1B3A6B);display:flex;align-items:center;justify-content:center}
+.logo-icon svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.logo-name{font-size:16px;font-weight:700;letter-spacing:-.4px}
+.logo-sub{font-size:11px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:.4px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border-radius:var(--radius);border:1.5px solid var(--border2);background:var(--bg);color:var(--text2);font:600 12px inherit;font-family:inherit;text-transform:uppercase;letter-spacing:.3px;cursor:pointer}
+.btn.primary{background:linear-gradient(135deg,#0D1F3C,#1B3A6B);color:#fff;border-color:transparent;box-shadow:0 6px 16px rgba(10,22,40,.22)}
+.btn.danger{color:var(--red-t);border-color:rgba(220,38,38,.25)}
+.btn.ok{color:var(--green-t);border-color:rgba(5,150,105,.3)}
+.btn:disabled{opacity:.6;cursor:wait}
+.body{padding:24px 28px 32px}
+.sec{font-size:10px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:.8px;margin:6px 0 12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:22px}
+.stat{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;position:relative;overflow:hidden}
+.stat::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--gold),transparent)}
+.slabel{font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+.sval{font-size:26px;font-weight:800;letter-spacing:-1px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);padding:10px;border-bottom:1px solid var(--border)}
+td{padding:12px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.tname{font-weight:700}
+.tid{font-family:'SF Mono','Fira Code',monospace;font-size:11px;color:var(--text3)}
+.pill{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.3px}
+.pill.active{background:var(--green-bg);color:var(--green-t)}
+.pill.suspended{background:var(--red-bg);color:var(--red-t)}
+.card{border:1.5px solid var(--border2);border-radius:14px;overflow:hidden}
+.scroll{overflow-x:auto}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.fg label{display:block;font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.6px}
+.fg input,.fg select{width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1.5px solid #E2E8F1;border-radius:var(--radius);background:#F7F9FC;font-size:14px;color:var(--text);font-family:inherit;outline:none}
+.fg input:focus,.fg select:focus{border-color:#1B4FD8;background:#fff;box-shadow:0 0 0 4px rgba(27,79,216,.10)}
+.hint{font-size:11.5px;color:var(--text3);margin-top:4px}
+.empty{text-align:center;padding:36px 10px;color:var(--text3)}
+.overlay{display:none;position:fixed;inset:0;background:rgba(4,10,22,.62);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:16px;z-index:50}
+.overlay.open{display:flex}
+.sheet{background:#fff;border-radius:22px;padding:22px 22px 26px;width:100%;max-width:620px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(4,10,22,.4);position:relative}
+.sheet::after{content:'';position:absolute;top:0;left:24px;right:24px;height:3px;border-radius:0 0 3px 3px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+.sheet-title{font-size:18px;font-weight:700;letter-spacing:-.5px;padding-bottom:14px;border-bottom:1px solid #EEF1F6;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center}
+.x{background:var(--bg2);border:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--text3);font-size:16px}
+.sub-btn{width:100%;margin-top:16px;padding:13px;border:none;border-radius:12px;background:linear-gradient(135deg,#0D1F3C,#1B3A6B);color:#fff;font:700 14px inherit;font-family:inherit;cursor:pointer;box-shadow:0 8px 20px rgba(10,22,40,.25)}
+.err{display:none;background:var(--red-bg);color:var(--red-t);padding:9px 12px;border-radius:8px;font-size:12.5px;margin-top:12px}
+#login{max-width:400px;margin:8vh auto 0;background:#fff;border-radius:22px;padding:28px;box-shadow:0 30px 80px rgba(0,0,0,.45)}
+#login h1{font-size:20px;letter-spacing:-.5px;margin-bottom:4px}
+#login p{font-size:13px;color:var(--text3);margin-bottom:18px}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(12px);background:linear-gradient(135deg,#0D1F3C,#132B52);color:#fff;padding:11px 22px;border-radius:30px;font-size:13px;font-weight:600;opacity:0;transition:all .3s;pointer-events:none;z-index:99;border:1px solid rgba(217,184,108,.3)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (max-width:640px){
+  .head,.body{padding-left:16px;padding-right:16px}
+  .grid{grid-template-columns:1fr}
+  body{padding:0}
+  .wrap{border-radius:0;min-height:100vh}
+}
+</style>
+</head>
+<body>
+
+<div id="login" style="display:none">
+  <div class="logo" style="margin-bottom:18px"><div class="logo-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div><div><div class="logo-name">SpareTrack</div><div class="logo-sub">Platform Console</div></div></div>
+  <h1>Platform owner sign in</h1>
+  <p>Only accounts listed in <code>platformAdmins</code> can open this console.</p>
+  <div class="fg" style="margin-bottom:12px"><label>Email</label><input id="l-email" type="email" autocomplete="username"></div>
+  <div class="fg"><label>Password</label><input id="l-pass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()"></div>
+  <button class="sub-btn" id="l-btn" onclick="login()">Sign In</button>
+  <div class="err" id="l-err"></div>
+</div>
+
+<div class="wrap" id="app" style="display:none">
+  <div class="head">
+    <div class="logo"><div class="logo-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div><div><div class="logo-name">SpareTrack</div><div class="logo-sub">Platform Console</div></div></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="who" style="font-size:12px;color:var(--text3)"></span>
+      <button class="btn primary" onclick="openCreate()">+ New Company</button>
+      <button class="btn" onclick="logout()">Sign Out</button>
+    </div>
+  </div>
+  <div class="body">
+    <div class="stats" id="stats"></div>
+    <div class="sec">Companies (tenants)</div>
+    <div class="card"><div class="scroll"><table>
+      <thead><tr><th>Company</th><th>Plan</th><th>Users</th><th>Status</th><th>Created</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+    </table></div></div>
+  </div>
+</div>
+
+<div class="overlay" id="m-create">
+  <div class="sheet">
+    <div class="sheet-title"><span>New Company</span><button class="x" onclick="closeCreate()">×</button></div>
+    <div class="grid">
+      <div class="fg" style="grid-column:1/-1"><label>Company Name *</label><input id="c-name" placeholder="e.g. Syarikat Contoh Sdn Bhd" oninput="autoId()"></div>
+      <div class="fg"><label>Company ID *</label><input id="c-id" placeholder="contoh" oninput="this.dataset.touched=1"><div class="hint">Lowercase letters, numbers, dashes. Cannot be changed later.</div></div>
+      <div class="fg"><label>Plan</label><select id="c-plan"><option value="starter">Starter</option><option value="pro" selected>Pro</option><option value="business">Business</option></select></div>
+      <div class="fg"><label>Max Users</label><input id="c-max" type="number" min="1" value="20"></div>
+      <div class="fg"><label>ntfy Topic</label><input id="c-ntfy" placeholder="auto-generated"><div class="hint">Random by default, so other people cannot guess it.</div></div>
+    </div>
+    <div class="sec" style="margin-top:18px">First admin for this company</div>
+    <div class="grid">
+      <div class="fg"><label>Admin Name *</label><input id="c-aname" placeholder="Full name"></div>
+      <div class="fg"><label>Admin Email *</label><input id="c-aemail" type="email" placeholder="admin@company.com"></div>
+      <div class="fg"><label>Temporary Password *</label><input id="c-apass" type="text" placeholder="Min 6 characters"><div class="hint">The admin can change it with "Forgot password".</div></div>
+    </div>
+    <button class="sub-btn" id="c-btn" onclick="createTenant()">Create Company</button>
+    <div class="err" id="c-err"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="firebase-config.js"></script>
+<script>
+// Firebase settings: see firebase-config.js. On localhost the console uses the emulators.
+const CFG = ACTIVE_FIREBASE_CONFIG;
+const SDK='https://www.gstatic.com/firebasejs/10.7.1/';
+let F, A, initializeApp, deleteApp, db, auth;
+
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
+function showErr(id,msg){const e=document.getElementById(id);e.textContent=msg;e.style.display=msg?'block':'none';}
+function randomTopic(id){return 'st-'+(id||'co')+'-'+Math.random().toString(36).slice(2,8);}
+
+async function init(){
+  if(!USE_EMULATOR&&!FIREBASE_CONFIG_READY){
+    show('login'); showErr('l-err','Firebase is not set up yet. Fill in firebase-config.js with your Firebase project settings.');
+    document.getElementById('l-btn').disabled=true; return;
+  }
+  ({initializeApp,deleteApp}=await import(SDK+'firebase-app.js'));
+  F=await import(SDK+'firebase-firestore.js');
+  A=await import(SDK+'firebase-auth.js');
+  const app=initializeApp(CFG);
+  db=F.getFirestore(app);
+  auth=A.getAuth(app);
+  if(USE_EMULATOR){
+    F.connectFirestoreEmulator(db,'127.0.0.1',8080);
+    A.connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
+  }
+  A.onAuthStateChanged(auth, async user=>{
+    if(!user){ show('login'); return; }
+    const pa=await F.getDoc(F.doc(db,'platformAdmins',user.uid)).catch(()=>null);
+    if(!pa||!pa.exists()){
+      await A.signOut(auth); show('login');
+      showErr('l-err','This account is not a platform owner.');
+      return;
+    }
+    document.getElementById('who').textContent=user.email;
+    show('app'); loadTenants();
+  });
+}
+function show(which){
+  document.getElementById('login').style.display=which==='login'?'block':'none';
+  document.getElementById('app').style.display=which==='app'?'block':'none';
+  const b=document.getElementById('l-btn'); b.disabled=false; b.textContent='Sign In';
+}
+async function login(){
+  const b=document.getElementById('l-btn'); showErr('l-err','');
+  b.disabled=true; b.textContent='Signing in...';
+  try{ await A.signInWithEmailAndPassword(auth,document.getElementById('l-email').value.trim(),document.getElementById('l-pass').value); }
+  catch(e){ showErr('l-err','Incorrect email or password.'); b.disabled=false; b.textContent='Sign In'; }
+}
+async function logout(){ await A.signOut(auth); }
+
+let tenants=[];
+async function loadTenants(){
+  const snap=await F.getDocs(F.collection(db,'tenants'));
+  tenants=await Promise.all(snap.docs.map(async d=>{
+    // The owner sees each company's user list but not its inventory (rules deny it)
+    const m=await F.getDocs(F.collection(db,'tenants',d.id,'members'));
+    return {id:d.id,...d.data(),users:m.size,activeUsers:m.docs.filter(x=>x.data().status==='active').length};
+  }));
+  tenants.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  render();
+}
+function render(){
+  const act=tenants.filter(t=>t.status==='active').length;
+  document.getElementById('stats').innerHTML=`
+    <div class="stat"><div class="slabel">Companies</div><div class="sval">${tenants.length}</div></div>
+    <div class="stat"><div class="slabel">Active</div><div class="sval" style="color:var(--green)">${act}</div></div>
+    <div class="stat"><div class="slabel">Suspended</div><div class="sval" style="color:var(--red)">${tenants.length-act}</div></div>
+    <div class="stat"><div class="slabel">Total Users</div><div class="sval">${tenants.reduce((a,t)=>a+t.users,0)}</div></div>`;
+  const rows=document.getElementById('rows');
+  if(!tenants.length){rows.innerHTML='<tr><td colspan="6" class="empty">No companies yet. Click “New Company”.</td></tr>';return;}
+  rows.innerHTML=tenants.map(t=>`<tr>
+    <td><div class="tname">${esc(t.name)}</div><div class="tid">${esc(t.id)}</div></td>
+    <td style="text-transform:capitalize">${esc(t.plan||'-')}</td>
+    <td>${t.activeUsers}${t.users!==t.activeUsers?` <span style="color:var(--text3)">(+${t.users-t.activeUsers} disabled)</span>`:''} / ${esc(t.maxUsers||'-')}</td>
+    <td><span class="pill ${t.status==='active'?'active':'suspended'}">${esc(t.status)}</span></td>
+    <td style="color:var(--text3);font-size:12px">${t.createdAt?new Date(t.createdAt).toLocaleDateString('en-MY'):'-'}</td>
+    <td style="text-align:right">${t.status==='active'
+      ?`<button class="btn danger" onclick="setStatus('${esc(t.id)}','suspended')">Suspend</button>`
+      :`<button class="btn ok" onclick="setStatus('${esc(t.id)}','active')">Activate</button>`}</td>
+  </tr>`).join('');
+}
+async function setStatus(id,status){
+  const t=tenants.find(x=>x.id===id);
+  if(status==='suspended'&&!confirm('Suspend '+t.name+'? All of its users lose access immediately. Data is kept.'))return;
+  await F.updateDoc(F.doc(db,'tenants',id),{status});
+  toast(t.name+(status==='active'?' activated':' suspended'));
+  loadTenants();
+}
+
+function openCreate(){
+  ['c-name','c-id','c-ntfy','c-aname','c-aemail','c-apass'].forEach(i=>{const e=document.getElementById(i);e.value='';delete e.dataset.touched;});
+  showErr('c-err','');
+  document.getElementById('m-create').classList.add('open');
+}
+function closeCreate(){document.getElementById('m-create').classList.remove('open');}
+function autoId(){
+  const idEl=document.getElementById('c-id'); if(idEl.dataset.touched)return;
+  idEl.value=document.getElementById('c-name').value.toLowerCase()
+    .replace(/\b(sdn|bhd|berhad|enterprise|plt)\b/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,24);
+}
+async function createTenant(){
+  const v=id=>document.getElementById(id).value.trim();
+  const name=v('c-name'), id=v('c-id'), plan=v('c-plan'), maxUsers=parseInt(v('c-max'))||20;
+  const aname=v('c-aname'), aemail=v('c-aemail'), apass=document.getElementById('c-apass').value;
+  const ntfy=v('c-ntfy')||randomTopic(id);
+  showErr('c-err','');
+  if(!name||!id||!aname||!aemail||!apass) return showErr('c-err','Please fill in all required fields.');
+  if(!/^[a-z0-9][a-z0-9-]{1,30}$/.test(id)) return showErr('c-err','Company ID: 2-31 lowercase letters, numbers or dashes.');
+  if(apass.length<6) return showErr('c-err','Password must be at least 6 characters.');
+  if(tenants.some(t=>t.id===id)) return showErr('c-err','Company ID "'+id+'" is already taken.');
+  const btn=document.getElementById('c-btn'); btn.disabled=true; btn.textContent='Creating...';
+  let sec=null;
+  try{
+    // Secondary app: create the admin's login without signing the owner out
+    sec=initializeApp(CFG,'sec_'+Date.now());
+    const secAuth=A.getAuth(sec);
+    if(USE_EMULATOR) A.connectAuthEmulator(secAuth,'http://127.0.0.1:9099',{disableWarnings:true});
+    const cred=await A.createUserWithEmailAndPassword(secAuth,aemail,apass);
+    const uid=cred.user.uid;
+    await A.signOut(secAuth);
+    const now=Date.now(), owner=auth.currentUser.uid;
+    const b=F.writeBatch(db);
+    b.set(F.doc(db,'tenants',id),{name,status:'active',plan,maxUsers,createdAt:now,createdBy:owner,settings:{ntfyTopic:ntfy}});
+    b.set(F.doc(db,'tenants',id,'members',uid),{name:aname,email:aemail,role:'admin',status:'active',createdAt:now,createdBy:owner});
+    b.set(F.doc(db,'userTenants',uid),{tenantId:id});
+    await b.commit();
+    closeCreate(); toast(name+' created ✓ — admin: '+aemail);
+    loadTenants();
+  }catch(e){
+    let msg=e.message||String(e);
+    if(e.code==='auth/email-already-in-use') msg='That admin email is already registered (maybe with another company).';
+    showErr('c-err',msg);
+  }finally{
+    if(sec) try{await deleteApp(sec);}catch(_){}
+    btn.disabled=false; btn.textContent='Create Company';
+  }
+}
+document.getElementById('m-create').addEventListener('click',e=>{if(e.target.id==='m-create')closeCreate();});
+init().catch(e=>{document.body.insertAdjacentHTML('beforeend','<div style="color:#fff;padding:20px">Failed to load Firebase: '+esc(e.message)+'</div>');});
+</script>
+</body>
+</html>

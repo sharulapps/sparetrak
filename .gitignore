@@ -1,0 +1,7 @@
+node_modules/
+backup/
+# credentials and password hashes — never commit
+serviceAccount*.json
+*-key.json
+users*.json
+*-debug.log

@@ -1,0 +1,28 @@
+{
+  "name": "sparetrak",
+  "version": "1.0.0",
+  "description": "SpareTrack v2 — spare part management (Firebase + Cloudflare Pages)",
+  "scripts": {
+    "test": "firebase emulators:exec --only firestore --project demo-sparetrack-rules \"node --test tests/rules.test.mjs\"",
+    "emulators": "firebase emulators:start --only firestore,auth --project demo-sparetrack",
+    "seed": "node seed.mjs",
+    "serve": "npx serve -l 5000 public",
+    "e2e": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e.mjs\"",
+    "test:migrate": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/test-migrate.mjs\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "10.7.1",
+    "firebase-admin": "^12.7.0",
+    "firebase-tools": "^13.35.1"
+  },
+  "type": "module",
+  "devDependencies": {
+    "playwright": "^1.56.1",
+    "qrcodejs": "^1.0.0"
+  },
+  "private": true
+}
