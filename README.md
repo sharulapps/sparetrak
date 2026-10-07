@@ -19,7 +19,7 @@ migrate.mjs              copy MNSB data from the old project into this one
 MIGRATION.md             step-by-step setup + cutover guide (start here)
 seed.mjs                 demo data for local emulators
 tests/rules.test.mjs     35 security-rules tests
-tools/e2e.mjs            browser walkthrough on emulators (22 checks + screenshots)
+tools/e2e.mjs            browser walkthrough on emulators (24 checks + screenshots)
 tools/test-migrate.mjs   migration rehearsal old project → new project (18 checks)
 tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks)
 tools/build-index.py     one-off: generated public/index.html from sharulapps/sparetrack.

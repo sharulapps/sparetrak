@@ -491,6 +491,19 @@ body {
 .dup-table tr:last-child td { border-bottom:none }
 .dup-table td.same { background:#FFF7E6; color:var(--amber-t); font-weight:600 }
 .dup-table .act { padding:4px 9px }
+/* Junk entries (part code saved as the part name) */
+.junk-box { border:1.5px solid rgba(220,38,38,.25); border-radius:var(--radius-lg); margin-bottom:16px; overflow:hidden }
+.junk-head { padding:10px 12px; background:#FEF2F2; color:#7F1D1D; font-size:12.5px; line-height:1.5; border-bottom:1px solid rgba(220,38,38,.15) }
+.junk-head b { color:#991B1B }
+.junk-box .dup-scroll { max-height:320px; overflow:auto }
+.dup-table.junk-table { min-width:520px }
+.dup-table.junk-table td:first-child, .dup-table.junk-table th:first-child { min-width:0; width:1%; padding-right:4px }
+.dup-table.junk-table td:nth-child(2) { white-space:nowrap }
+.junk-table th:last-child, .junk-table td:last-child { position:static; box-shadow:none }
+.junk-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border-top:1px solid var(--border) }
+.junk-del { padding:8px 14px; border:none; border-radius:8px; background:var(--red); color:#fff; font:700 12px inherit; font-family:inherit; cursor:pointer; text-transform:uppercase; letter-spacing:.3px }
+.junk-del:disabled { opacity:.5; cursor:default }
+.junk-note { font-size:11.5px; color:var(--text3) }
 .dup-table td:first-child { min-width:160px }
 .dup-table th, .dup-table td { padding-left:8px; padding-right:8px }
 .dup-table th:last-child, .dup-table td:last-child { position:sticky; right:0; background:#fff; box-shadow:-6px 0 8px -6px rgba(10,22,40,.12) }
@@ -1361,6 +1374,7 @@ async function sendPasswordReset(email){
     <span>Duplicate Check</span>
     <button class="close" aria-label="Close" onclick="closeM('m-dup')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
+  <div id="dup-junk"></div>
   <div id="dup-summary"></div>
   <div id="dup-list"></div>
 </div>
@@ -2221,7 +2235,78 @@ function findDuplicates(){
     .map(g=>({parts:g,reasons:['exact'],top:'exact'}))
     .sort((a,b)=>String(a.parts[0].name).localeCompare(String(b.parts[0].name)));
 }
+// ── JUNK ENTRIES ─────────────────────────────
+// Parts whose NAME is only a part code (e.g. "MAINTE00313"), usually left by an
+// Excel import that read the code column as the name. Listed only when the part
+// also has 0 stock, no category/location/supplier, a code that is empty or equal
+// to the name, and no transaction or approval using it.
+function findJunkParts(){
+  const norm=v=>String(v==null?'':v).trim().toUpperCase();
+  const looksLikeCode=s=>/^[A-Z]{3,}[A-Z0-9\-\/]*[0-9]{3,}$/.test(s);
+  const used=new Set([...transactions,...(typeof approvalRequests!=='undefined'?approvalRequests:[])]
+    .map(x=>String(x&&x.partId||'')).filter(Boolean));
+  const realByCode=new Map();
+  for(const p of parts){ const c=norm(p.code); if(c&&norm(p.name)!==c&&!realByCode.has(c)) realByCode.set(c,p.name); }
+  return parts.filter(p=>{
+    const n=norm(p.name), c=norm(p.code);
+    return looksLikeCode(n)&&(!c||c===n)&&!norm(p.cat)&&!norm(p.loc)&&!norm(p.supplier)
+      &&!(Number(p.qty)>0)&&!used.has(String(p.id));
+  }).map(p=>({p,real:realByCode.get(norm(p.name))||''}));
+}
+function renderJunk(){
+  const el=document.getElementById('dup-junk'); if(!el) return;
+  const junk=findJunkParts(); window._junk=junk;
+  if(!junk.length){ el.innerHTML=''; return; }
+  const strong=junk.filter(j=>j.real).length, canDel=can('edit');
+  el.innerHTML=`<div class="junk-box">
+    <div class="junk-head"><b>Junk entries · ${junk.length}</b> — parts whose name is only a part code, with 0 stock, no category / location / supplier and no transactions.
+      ${strong} of them use the code of a real part${canDel?' and are ticked; tick the others only if you are sure.':'.'}</div>
+    <div class="dup-scroll"><table class="dup-table junk-table">
+      <thead><tr>${canDel?'<th><input type="checkbox" id="junk-all" onchange="toggleAllJunk(this.checked)" title="Select all"></th>':''}<th>Name (junk)</th><th>Real part with this code</th><th>Stock</th></tr></thead>
+      <tbody>${junk.map((j,i)=>`<tr>${canDel?`<td><input type="checkbox" class="junk-cb" data-i="${i}" ${j.real?'checked':''} onchange="updateJunkBtn()"></td>`:''}
+        <td><b>${dupEsc(j.p.name)}</b></td>
+        <td>${j.real?dupEsc(j.real):'<span style="color:var(--text3)">— none —</span>'}</td>
+        <td>${dupEsc(j.p.qty==null?0:j.p.qty)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    ${canDel?`<div class="junk-actions"><button class="junk-del" id="junk-del-btn" onclick="deleteSelectedJunk()">Delete selected</button>
+      <span class="junk-note">A backup file of the selected parts is downloaded first. Deleting cannot be undone.</span></div>`:''}
+  </div>`;
+  updateJunkBtn();
+}
+function selectedJunk(){return [...document.querySelectorAll('.junk-cb:checked')].map(cb=>window._junk[+cb.dataset.i]).filter(Boolean);}
+function toggleAllJunk(on){document.querySelectorAll('.junk-cb').forEach(cb=>cb.checked=on);updateJunkBtn();}
+function updateJunkBtn(){
+  const b=document.getElementById('junk-del-btn'); if(!b) return;
+  const n=selectedJunk().length; b.disabled=!n; b.textContent=n?`Delete ${n} selected`:'Delete selected';
+}
+async function deleteSelectedJunk(){
+  if(!can('edit')){toast('Permission denied!');return;}
+  const list=selectedJunk(); if(!list.length) return;
+  if(!confirm(`Delete ${list.length} junk part(s)?\n\nA backup file is downloaded first. This cannot be undone.`)) return;
+  try{
+    const blob=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),parts:list.map(j=>j.p)},null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='sparetrack-junk-parts-backup-'+new Date().toISOString().slice(0,10)+'.json';
+    document.body.appendChild(a); a.click(); a.remove();
+  }catch(e){}
+  const btn=document.getElementById('junk-del-btn'); let done=0, failed=0;
+  if(btn) btn.disabled=true;
+  for(const j of list){
+    try{
+      if(useCloud){ const {deleteDoc,doc,db}=window._fs; await deleteDoc(doc(db,'parts',j.p.id)); }
+      else { parts=parts.filter(p=>p.id!==j.p.id); }
+      done++;
+    }catch(e){ failed++; }
+    if(btn&&done%20===0) btn.textContent=`Deleting… ${done}/${list.length}`;
+  }
+  if(!useCloud){ saveLocal(); refresh(); }
+  else { const ids=new Set(list.map(j=>String(j.p.id))); parts=parts.filter(p=>!ids.has(String(p.id))); refresh(); }
+  toast(`Deleted ${done} junk part(s)`+(failed?` · ${failed} failed`:'')+' ✓');
+  openDupCheck();
+}
+
 function openDupCheck(){
+  renderJunk();
   const groups=findDuplicates();
   const sum=document.getElementById('dup-summary');
   const list=document.getElementById('dup-list');

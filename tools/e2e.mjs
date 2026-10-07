@@ -109,6 +109,23 @@ try {
   });
   check('Browser-console read of other tenant is denied', hack === 'permission-denied', hack);
 
+  // 3b. Junk entries (part code saved as the name) are listed and deleted from Check Duplicates
+  await p.evaluate(async () => {
+    const { setDoc, doc, db } = window._fs;
+    await setDoc(doc(db, 'parts', 'junk-1'), { name: 'MAINTE00020', qty: 0, min: 0, unit: 'pcs' });
+  });
+  await p.waitForFunction(() => parts.some(x => x.id === 'junk-1'), null, { timeout: 10000 });
+  await p.evaluate(() => openDupCheck());
+  await p.waitForSelector('.junk-table', { timeout: 5000 });
+  check('Check Duplicates lists the junk entry next to its real part', /MAINTE00020[\s\S]*BUSSMAN 100ET/.test(await p.textContent('.junk-table')) && (await p.$$('.junk-cb:checked')).length === 1);
+  await p.waitForTimeout(300);
+  await shot(p, '17-junk-entries');
+  await p.click('#junk-del-btn');
+  await p.waitForFunction(() => !parts.some(x => x.id === 'junk-1'), null, { timeout: 10000 });
+  const junkGone = await p.evaluate(async () => { const { getDoc, doc, db } = window._fs; return !(await getDoc(doc(db, 'parts', 'junk-1'))).exists(); });
+  check('Junk entry deleted from Firestore; real parts kept', junkGone && await p.evaluate(() => parts.some(x => x.code === 'MAINTE00020')));
+  await p.evaluate(() => closeM('m-dup'));
+
   // 4. Tenant admin adds a user to own company
   await p.evaluate(() => tab('users', document.getElementById('nav-users')));
   await p.waitForSelector('#users-section-list div', { timeout: 10000 });
