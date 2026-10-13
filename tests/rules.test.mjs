@@ -7,7 +7,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc, collection,
-  writeBatch, increment,
+  writeBatch, increment, serverTimestamp,
 } from 'firebase/firestore';
 
 let env;
@@ -38,6 +38,15 @@ beforeEach(async () => {
 });
 
 const as = uid => env.authenticatedContext(uid).firestore();
+// Every write to parts / transactions / approvals carries updatedAt (the app's sync needs it)
+const S = o => ({ ...o, updatedAt: serverTimestamp() });
+// Delete the way the app does: the doc + a deletions/{col}~{id} record in one batch
+function del(db, tid, col, id, { log = true } = {}) {
+  const b = writeBatch(db);
+  b.delete(doc(db, `tenants/${tid}/${col}/${id}`));
+  if (log) b.set(doc(db, `tenants/${tid}/deletions/${col}~${id}`), { col, docId: id, deletedAt: serverTimestamp() });
+  return b.commit();
+}
 
 // Add a member the way the app does: member doc + userTenants + userCount+1 in one batch
 function addMember(db, tid, uid, role = 'technician', { bump = true, mapping = true } = {}) {
@@ -86,22 +95,23 @@ test('technician cannot add parts or change stock', async () => {
 });
 test('technician can submit an OUT request for approval', async () => {
   await assertSucceeds(addDoc(collection(as('mnsb-tech'), 'tenants/mnsb/approvals'),
-    { partId: 'p1', qty: 1, status: 'pending', requestedByUid: 'mnsb-tech' }));
+    S({ partId: 'p1', qty: 1, status: 'pending', requestedByUid: 'mnsb-tech' })));
 });
 test('technician cannot submit a request in someone else\'s name', async () => {
   await assertFails(addDoc(collection(as('mnsb-tech'), 'tenants/mnsb/approvals'),
-    { partId: 'p1', qty: 1, status: 'pending', requestedByUid: 'mnsb-admin' }));
+    S({ partId: 'p1', qty: 1, status: 'pending', requestedByUid: 'mnsb-admin' })));
 });
 test('technician cannot approve', async () => {
   await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'tenants/mnsb/approvals/a1'),
     { status: 'pending', requestedByUid: 'mnsb-tech' }));
-  await assertFails(updateDoc(doc(as('mnsb-tech'), 'tenants/mnsb/approvals/a1'), { status: 'approved' }));
-  await assertSucceeds(updateDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/approvals/a1'), { status: 'approved' }));
+  await assertFails(updateDoc(doc(as('mnsb-tech'), 'tenants/mnsb/approvals/a1'), S({ status: 'approved' })));
+  await assertSucceeds(updateDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/approvals/a1'), S({ status: 'approved' })));
 });
 test('only tenant admin can edit or delete transactions (audit trail)', async () => {
-  const ref = await addDoc(collection(as('mnsb-mgr'), 'tenants/mnsb/transactions'), { type: 'in', qty: 1 });
-  await assertFails(deleteDoc(doc(as('mnsb-mgr'), ref.path)));
-  await assertSucceeds(deleteDoc(doc(as('mnsb-admin'), ref.path)));
+  const ref = await addDoc(collection(as('mnsb-mgr'), 'tenants/mnsb/transactions'), S({ type: 'in', qty: 1 }));
+  await assertFails(del(as('mnsb-mgr'), 'mnsb', 'transactions', ref.id));
+  await assertFails(updateDoc(doc(as('mnsb-mgr'), ref.path), S({ qty: 9 })));
+  await assertSucceeds(del(as('mnsb-admin'), 'mnsb', 'transactions', ref.id));
 });
 
 // ── Tenant admin manages own users ──────────────
@@ -213,20 +223,79 @@ test('trial admin cannot raise their own limits or reset the counter', async () 
 test('trial: parts only in slot-1..slot-10, so an 11th part cannot exist', async () => {
   await assertSucceeds(trialSignup(as('owner1'), 'owner1', 'trial-co'));
   const db = as('owner1');
-  for (let i = 1; i <= 10; i++) await assertSucceeds(setDoc(doc(db, `tenants/trial-co/parts/slot-${i}`), { name: 'p' + i, qty: 1 }));
-  await assertFails(setDoc(doc(db, 'tenants/trial-co/parts/slot-11'), { name: 'p11', qty: 1 }));
-  await assertFails(addDoc(collection(db, 'tenants/trial-co/parts'), { name: 'random id', qty: 1 }));
-  await assertFails(setDoc(doc(db, 'tenants/trial-co/parts/slot-0'), { name: 'p0', qty: 1 }));
+  for (let i = 1; i <= 10; i++) await assertSucceeds(setDoc(doc(db, `tenants/trial-co/parts/slot-${i}`), S({ name: 'p' + i, qty: 1 })));
+  await assertFails(setDoc(doc(db, 'tenants/trial-co/parts/slot-11'), S({ name: 'p11', qty: 1 })));
+  await assertFails(addDoc(collection(db, 'tenants/trial-co/parts'), S({ name: 'random id', qty: 1 })));
+  await assertFails(setDoc(doc(db, 'tenants/trial-co/parts/slot-0'), S({ name: 'p0', qty: 1 })));
   // editing an existing slot is still fine; deleting frees it for reuse
-  await assertSucceeds(updateDoc(doc(db, 'tenants/trial-co/parts/slot-3'), { qty: 5 }));
-  await assertSucceeds(deleteDoc(doc(db, 'tenants/trial-co/parts/slot-3')));
-  await assertSucceeds(setDoc(doc(db, 'tenants/trial-co/parts/slot-3'), { name: 'reused', qty: 1 }));
+  await assertSucceeds(updateDoc(doc(db, 'tenants/trial-co/parts/slot-3'), S({ qty: 5 })));
+  await assertSucceeds(del(db, 'trial-co', 'parts', 'slot-3'));
+  await assertSucceeds(setDoc(doc(db, 'tenants/trial-co/parts/slot-3'), S({ name: 'reused', qty: 1 })));
 });
 test('companies without a part limit keep normal ids', async () => {
-  await assertSucceeds(addDoc(collection(as('mnsb-admin'), 'tenants/mnsb/parts'), { name: 'any id', qty: 1 }));
+  await assertSucceeds(addDoc(collection(as('mnsb-admin'), 'tenants/mnsb/parts'), S({ name: 'any id', qty: 1 })));
 });
 test('platform owner upgrades a trial by lifting the limits', async () => {
   await assertSucceeds(trialSignup(as('owner1'), 'owner1', 'trial-co'));
   await assertSucceeds(updateDoc(doc(as('owner'), 'tenants/trial-co'), { plan: 'pro', maxUsers: 20, maxParts: 0 }));
-  await assertSucceeds(addDoc(collection(as('owner1'), 'tenants/trial-co/parts'), { name: 'unlimited now', qty: 1 }));
+  await assertSucceeds(addDoc(collection(as('owner1'), 'tenants/trial-co/parts'), S({ name: 'unlimited now', qty: 1 })));
+});
+
+// ── Sync bookkeeping and stock movements ────────
+test('writes without updatedAt are refused (other devices would never see them)', async () => {
+  const db = as('mnsb-admin');
+  await assertFails(setDoc(doc(db, 'tenants/mnsb/parts/p2'), { name: 'x', qty: 1 }));
+  await assertFails(updateDoc(doc(db, 'tenants/mnsb/parts/p1'), { qty: 6 }));
+  await assertFails(addDoc(collection(db, 'tenants/mnsb/transactions'), { type: 'in', qty: 1 }));
+  await assertFails(addDoc(collection(as('mnsb-tech'), 'tenants/mnsb/approvals'), { status: 'pending', requestedByUid: 'mnsb-tech' }));
+  await assertFails(updateDoc(doc(db, 'tenants/mnsb/parts/p1'), { qty: 6, updatedAt: new Date(0) }));
+  await assertSucceeds(updateDoc(doc(db, 'tenants/mnsb/parts/p1'), S({ qty: 6 })));
+});
+test('stock movement: transaction + increment in one batch; stock cannot go below 0', async () => {
+  const db = as('mnsb-mgr');
+  const move = n => {
+    const b = writeBatch(db);
+    b.set(doc(collection(db, 'tenants/mnsb/transactions')), S({ partId: 'p1', type: n > 0 ? 'in' : 'out', qty: Math.abs(n) }));
+    b.update(doc(db, 'tenants/mnsb/parts/p1'), S({ qty: increment(n) }));
+    return b.commit();
+  };
+  await assertSucceeds(move(-3));            // 5 -> 2
+  await assertFails(move(-3));               // would be -1: whole batch refused
+  await env.withSecurityRulesDisabled(async ctx => {
+    const fs = ctx.firestore();
+    const d = (await getDoc(doc(fs, 'tenants/mnsb/parts/p1'))).data();
+    if (d.qty !== 2) throw new Error('qty should be 2, got ' + d.qty);
+    if ((await getDocs(collection(fs, 'tenants/mnsb/transactions'))).size !== 1) throw new Error('refused batch left a transaction');
+  });
+  await assertSucceeds(move(-2));            // exactly 0 is fine
+  await assertFails(setDoc(doc(as('mnsb-admin'), 'tenants/mnsb/parts/neg'), S({ name: 'neg', qty: -1 })));
+});
+test('a part that already has negative stock can still be edited (qty untouched)', async () => {
+  await env.withSecurityRulesDisabled(ctx => updateDoc(doc(ctx.firestore(), 'tenants/mnsb/parts/p1'), { qty: -4 }));
+  await assertSucceeds(updateDoc(doc(as('mnsb-admin'), 'tenants/mnsb/parts/p1'), S({ name: 'renamed' })));
+  await assertSucceeds(updateDoc(doc(as('mnsb-admin'), 'tenants/mnsb/parts/p1'), S({ qty: 0 })));
+});
+test('a request can be approved only once', async () => {
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'tenants/mnsb/approvals/a2'),
+    { status: 'pending', requestedByUid: 'mnsb-tech', qty: 1 }));
+  await assertSucceeds(updateDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/approvals/a2'), S({ status: 'approved' })));
+  await assertFails(updateDoc(doc(as('mnsb-admin'), 'tenants/mnsb/approvals/a2'), S({ status: 'approved' })));
+  await assertFails(updateDoc(doc(as('mnsb-admin'), 'tenants/mnsb/approvals/a2'), S({ status: 'rejected' })));
+});
+test('deleting a part needs a deletions record in the same batch', async () => {
+  await assertFails(deleteDoc(doc(as('mnsb-admin'), 'tenants/mnsb/parts/p1')));
+  await assertFails(del(as('mnsb-tech'), 'mnsb', 'parts', 'p1'));
+  await assertSucceeds(del(as('mnsb-mgr'), 'mnsb', 'parts', 'p1'));
+  await assertSucceeds(getDoc(doc(as('mnsb-tech'), 'tenants/mnsb/deletions/parts~p1')));
+  await assertFails(getDoc(doc(as('acme-admin'), 'tenants/mnsb/deletions/parts~p1')));
+});
+test('a fake deletions record cannot hide a part that still exists', async () => {
+  const db = as('mnsb-admin');
+  await assertFails(setDoc(doc(db, 'tenants/mnsb/deletions/parts~p1'), { col: 'parts', docId: 'p1', deletedAt: serverTimestamp() }));
+  // key must match col~docId
+  const b = writeBatch(db);
+  b.delete(doc(db, 'tenants/mnsb/parts/p1'));
+  b.set(doc(db, 'tenants/mnsb/deletions/parts~other'), { col: 'parts', docId: 'p1', deletedAt: serverTimestamp() });
+  await assertFails(b.commit());
+  await assertFails(setDoc(doc(db, 'tenants/mnsb/deletions/members~x'), { col: 'members', docId: 'x', deletedAt: serverTimestamp() }));
 });

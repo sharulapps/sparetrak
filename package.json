@@ -1,7 +1,7 @@
 {
   "name": "sparetrak",
   "version": "1.0.0",
-  "description": "SpareTrack v2 — spare part management (Firebase + Cloudflare Pages)",
+  "description": "SpareTrack v2 \u2014 spare part management (Firebase + Cloudflare Pages)",
   "scripts": {
     "test": "firebase emulators:exec --only firestore --project demo-sparetrack-rules \"node --test tests/rules.test.mjs\"",
     "emulators": "firebase emulators:start --only firestore,auth --project demo-sparetrack",
@@ -9,7 +9,8 @@
     "serve": "npx serve -l 5000 public",
     "e2e": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e.mjs\"",
     "test:migrate": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/test-migrate.mjs\"",
-    "e2e:trial": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-trial.mjs\""
+    "e2e:trial": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-trial.mjs\"",
+    "e2e:scale": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-scale.mjs\""
   },
   "keywords": [],
   "author": "",

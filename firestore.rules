@@ -20,6 +20,11 @@ rules_version = '2';
 //   parts  — when maxParts > 0, part ids must be slot-1 .. slot-<maxParts>,
 //            so more than maxParts parts cannot exist
 // Anyone signed in may create ONE free-trial company for themselves (self sign-up).
+//
+// Sync: the app caches parts / transactions / approvals on the device and only
+// reads documents changed since its last sync (updatedAt). So every write to
+// those collections must set updatedAt = request.time, and every delete must
+// leave deletions/{col}~{id} in the same batch, or other devices would miss it.
 
 service cloud.firestore {
   match /databases/{db}/documents {
@@ -67,6 +72,24 @@ service cloud.firestore {
     function userCountBumped(tid) {
       return getAfter(tenantPath(tid)).data.get('userCount', 0)
           == get(tenantPath(tid)).data.get('userCount', 0) + 1;
+    }
+
+    // ── Sync bookkeeping ────────────────────────────
+    function stamped() { return request.resource.data.updatedAt == request.time; }
+    function deletionPath(tid, col, id) {
+      return /databases/$(db)/documents/tenants/$(tid)/deletions/$(col + '~' + id);
+    }
+    function deletionLogged(tid, col, id) {
+      return existsAfter(deletionPath(tid, col, id))
+        && getAfter(deletionPath(tid, col, id)).data.deletedAt == request.time;
+    }
+    // Stock can't go below zero (checked only when qty changes, so old data stays editable)
+    function qtyOk() {
+      return !('qty' in request.resource.data)
+        || (request.resource.data.qty is number && request.resource.data.qty >= 0);
+    }
+    function qtyUnchangedOrOk() {
+      return request.resource.data.get('qty', null) == resource.data.get('qty', null) || qtyOk();
     }
 
     // ── Self sign-up: one free-trial company per account ──
@@ -149,24 +172,42 @@ service cloud.firestore {
 
       match /parts/{id} {
         allow read: if isMember(tid);
-        allow create: if canEditParts(tid) && partIdAllowed(tid, id);
-        allow delete: if canEditParts(tid);
-        allow update: if canMoveStock(tid);
+        allow create: if canEditParts(tid) && partIdAllowed(tid, id) && stamped() && qtyOk();
+        allow delete: if canEditParts(tid) && deletionLogged(tid, 'parts', id);
+        allow update: if canMoveStock(tid) && stamped() && qtyUnchangedOrOk();
       }
 
       match /transactions/{id} {
         allow read: if isMember(tid);
-        allow create: if canMoveStock(tid) || canApprove(tid);
-        allow update, delete: if hasRole(tid, ['admin']);   // keep the audit trail
+        allow create: if (canMoveStock(tid) || canApprove(tid)) && stamped();
+        // keep the audit trail
+        allow update: if hasRole(tid, ['admin']) && stamped();
+        allow delete: if hasRole(tid, ['admin']) && deletionLogged(tid, 'transactions', id);
       }
 
       match /approvals/{id} {
         allow read: if isMember(tid);
         allow create: if isMember(tid)
           && request.resource.data.requestedByUid == request.auth.uid
-          && request.resource.data.status == 'pending';
-        allow update: if canApprove(tid);
-        allow delete: if hasRole(tid, ['admin']);
+          && request.resource.data.status == 'pending'
+          && stamped();
+        // Only a pending request can be approved / rejected (no double booking)
+        allow update: if canApprove(tid) && stamped() && resource.data.status == 'pending';
+        allow delete: if hasRole(tid, ['admin']) && deletionLogged(tid, 'approvals', id);
+      }
+
+      // deletions/{col}~{docId}: tells other devices to drop a deleted doc.
+      // Only written together with the real delete (the doc must be gone after the batch).
+      match /deletions/{key} {
+        allow read: if isMember(tid);
+        allow create, update: if request.resource.data.keys().hasOnly(['col','docId','deletedAt'])
+          && request.resource.data.col in ['parts','transactions','approvals']
+          && request.resource.data.docId is string
+          && key == request.resource.data.col + '~' + request.resource.data.docId
+          && request.resource.data.deletedAt == request.time
+          && !existsAfter(/databases/$(db)/documents/tenants/$(tid)/$(request.resource.data.col)/$(request.resource.data.docId))
+          && (request.resource.data.col == 'parts' ? canEditParts(tid) : hasRole(tid, ['admin']));
+        allow delete: if false;
       }
     }
 

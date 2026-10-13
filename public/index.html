@@ -1635,26 +1635,69 @@ async function initFirebase(){
     const auth=am.getAuth(app);
     if(USE_EMULATOR) am.connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
     const tPath=name=>{ if(!TID) throw new Error('No company selected'); return ['tenants',TID,TENANT_COLS[name]||name]; };
+    // Sentinels made through window._fs are remembered so the local cache can
+    // apply them (increment / deleteField) without waiting for the server.
+    const SENT=new WeakMap();
+    const mark=(s,info)=>{SENT.set(s,info);return s;};
+    const stamp=data=>({...data,updatedAt:fsm.serverTimestamp()});
+    // Writes to parts / transactions / approvals: stamp updatedAt (rules require
+    // it, the delta sync reads by it) and apply to the local cache at once.
+    const fsSetDoc=async(ref,data,opts)=>{
+      const t=syncTarget(ref); if(!t) return opts?fsm.setDoc(ref,data,opts):fsm.setDoc(ref,data);
+      const d=stamp(data); localApply(t.col,t.id,d,opts&&opts.merge?'merge':'set',SENT);
+      try{ return await (opts?fsm.setDoc(ref,d,opts):fsm.setDoc(ref,d)); }catch(e){ syncRefetch([t]); throw e; }
+    };
+    const fsWriteBatch=d=>{
+      const b=fsm.writeBatch(d), ops=[], touched=[];
+      const w={
+        set(ref,data,opts){ const t=syncTarget(ref); if(t){ data=stamp(data); const x=data; ops.push(()=>localApply(t.col,t.id,x,opts&&opts.merge?'merge':'set',SENT)); touched.push(t); } opts?b.set(ref,data,opts):b.set(ref,data); return w; },
+        update(ref,data){ const t=syncTarget(ref); if(t){ data=stamp(data); const x=data; ops.push(()=>localApply(t.col,t.id,x,'update',SENT)); touched.push(t); } b.update(ref,data); return w; },
+        // Deleting a synced doc leaves deletions/{col}~{id} so other devices drop it too
+        delete(ref){ const t=syncTarget(ref); if(t){ b.set(fsm.doc(d,'tenants',TID,'deletions',t.col+'~'+t.id),{col:t.col,docId:t.id,deletedAt:fsm.serverTimestamp()}); ops.push(()=>localApply(t.col,t.id,null,'delete')); touched.push(t); } b.delete(ref); return w; },
+        size:()=>ops.length,
+        async commit(){ ops.forEach(f=>f()); try{ return await b.commit(); }catch(e){ syncRefetch(touched); throw e; } }
+      };
+      return w;
+    };
     window._fs={
       // tenant-scoped
       collection:(d,name,...rest)=>fsm.collection(d,...tPath(name),...rest),
       doc:(d,name,...rest)=>fsm.doc(d,...tPath(name),...rest),
+      // new doc ref with an auto id (for batches)
+      newDoc:name=>fsm.doc(fsm.collection(db,...tPath(name))),
       // unscoped, only for userTenants/ and tenants/{TID} itself
       rootDoc:fsm.doc,
-      getDocs:fsm.getDocs,getDoc:fsm.getDoc,setDoc:fsm.setDoc,updateDoc:fsm.updateDoc,deleteDoc:fsm.deleteDoc,
+      getDocs:fsm.getDocs,getDoc:fsm.getDoc,getCountFromServer:fsm.getCountFromServer,
+      setDoc:fsSetDoc,
+      updateDoc:async(ref,data)=>{
+        const t=syncTarget(ref); if(!t) return fsm.updateDoc(ref,data);
+        const d=stamp(data); localApply(t.col,t.id,d,'update',SENT);
+        try{ return await fsm.updateDoc(ref,d); }catch(e){ syncRefetch([t]); throw e; }
+      },
+      deleteDoc:async ref=>{
+        if(!syncTarget(ref)) return fsm.deleteDoc(ref);
+        return fsWriteBatch(db).delete(ref).commit();
+      },
       // Companies with a part limit store parts as slot-1..slot-N (rules allow no other ids)
       addDoc:async(colRef,data)=>{
+        let ref;
         if(TID&&colRef.path==='tenants/'+TID+'/parts'&&partLimit()){
           const id=nextPartSlot();
           if(!id) throw planLimitError('parts');
-          try{ await fsm.setDoc(fsm.doc(colRef,id),data); }
+          ref=fsm.doc(colRef,id);
+          try{ await fsSetDoc(ref,data); }
           catch(e){ reservedSlots.delete(id); throw e; }
-          return {id};
+          return ref;
         }
-        return fsm.addDoc(colRef,data);
+        ref=fsm.doc(colRef);
+        await fsSetDoc(ref,data);
+        return ref;
       },
-      increment:fsm.increment,
-      onSnapshot:fsm.onSnapshot,query:fsm.query,orderBy:fsm.orderBy,writeBatch:fsm.writeBatch,
+      increment:n=>mark(fsm.increment(n),{inc:n}),
+      deleteField:()=>mark(fsm.deleteField(),{del:true}),
+      serverTimestamp:fsm.serverTimestamp,Timestamp:fsm.Timestamp,
+      onSnapshot:fsm.onSnapshot,query:fsm.query,orderBy:fsm.orderBy,where:fsm.where,limit:fsm.limit,
+      writeBatch:fsWriteBatch,
       terminate:fsm.terminate,clearIndexedDbPersistence:fsm.clearIndexedDbPersistence,db
     };
     window._auth={auth,signInWithEmailAndPassword:am.signInWithEmailAndPassword,signOut:am.signOut,
@@ -1663,7 +1706,7 @@ async function initFirebase(){
     useCloud=true;
     // Listen to auth state
     am.onAuthStateChanged(auth, async user=>{
-      if(!user){ currentUser=null; TID=null; TENANT=null; showLogin(); return; }
+      if(!user){ stopSync(); currentUser=null; TID=null; TENANT=null; showLogin(); return; }
       // startTrial() creates the account first and the company a moment later;
       // it calls afterSignIn() itself once the company exists.
       if(window._signupPending) return;
@@ -1693,8 +1736,8 @@ async function afterSignIn(user){
       document.getElementById('firebase-status').innerHTML='<span style="color:var(--green-text)">✓ Firebase connected. Data sync active for '+tenantName()+'.</span>';
       document.getElementById('sync-bar').classList.add('show');
       document.getElementById('sync-msg').textContent='Cloud sync active - '+currentUser.name+' ('+currentUser.role+') · '+tenantName();
-      await loadFromCloud();
       listenCloud();
+      await startSync();
 }
 
 // Resolve which company the signed-in user belongs to. Throws a user-facing
@@ -1755,6 +1798,7 @@ function renderNtfyCard(){
       </ol>
       ${isAdmin?`<div class="ntfy-actions">
         <button class="act" onclick="sendNtfyTest()">Send test notification</button>
+        <button class="act" onclick="sendLowStockSummary()">Send low-stock summary</button>
         <button class="act" onclick="toggleNtfyEdit(true)">Change topic</button>
         <button class="act" onclick="regenNtfyTopic()" style="color:var(--red-text)">Generate new topic</button>
       </div>
@@ -1814,32 +1858,290 @@ function showLoginError(msg){
   if(btn){btn.textContent='Sign In';btn.disabled=false;}
 }
 
-async function loadFromCloud(){
-  const {collection,getDocs,query,orderBy,db}=window._fs;
-  const [ps,ts]=await Promise.all([getDocs(collection(db,'parts')),getDocs(query(collection(db,'transactions'),orderBy('createdAt','asc')))]);
-  parts=ps.docs.map(d=>({...d.data(),id:d.id}));
-  transactions=ts.docs.map(d=>({...d.data(),id:d.id}));
-  refresh();
+// ── SYNC ENGINE (cache + delta) ──────────────
+// Firestore bills one read per document returned. Reading every part and
+// every transaction on each app open gets expensive as data grows, so:
+//  • parts / transactions / approvals are kept in IndexedDB on the device;
+//  • on open the app only listens for documents whose updatedAt is after the
+//    newest server time it has already seen (a few reads, not thousands);
+//  • every write stamps updatedAt = serverTimestamp() (firestore.rules require
+//    it), so other devices always see the change;
+//  • deletes leave deletions/{col}~{id}, so other devices drop the doc too;
+//  • a full re-read still happens now and then as a safety net (FULL_EVERY),
+//    and transactions are loaded for the last TXN_WINDOW_DAYS only; older history
+//    is loaded on demand (reports / "Load full history").
+const SYNC_V=1, DAY_MS=864e5, TXN_WINDOW_DAYS=90;
+const SYNC_COLS={
+  parts:{fullEvery:7*DAY_MS},
+  approvals:{fullEvery:7*DAY_MS,windowDays:TXN_WINDOW_DAYS},
+  transactions:{fullEvery:30*DAY_MS,windowDays:TXN_WINDOW_DAYS}
+};
+const sync={tid:null,docs:{},meta:{},unsubs:[],dirty:new Set(),save:new Set(),t:null,saveT:null,idb:null,hiddenAt:0,
+  stats:{cacheDocs:0,serverDocs:0,deltaDocs:0,full:[]}};
+
+// IndexedDB key/value store (one entry per company + collection)
+const SYNC_IDB='sparetrack-cache';
+function idbOpen(){
+  if(!sync.idb) sync.idb=new Promise((res,rej)=>{
+    if(typeof indexedDB==='undefined') return rej(new Error('IndexedDB not available'));
+    const r=indexedDB.open(SYNC_IDB,1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('kv');
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+  return sync.idb;
+}
+async function idbGet(k){
+  try{ const d=await idbOpen(); return await new Promise((res,rej)=>{ const q=d.transaction('kv').objectStore('kv').get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+  catch(e){ return null; }
+}
+async function idbPut(k,v){
+  try{ const d=await idbOpen(); await new Promise((res,rej)=>{ const t=d.transaction('kv','readwrite'); t.objectStore('kv').put(v,k); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); }
+  catch(e){ console.warn('Cache save failed:',e&&e.message); }
+}
+async function idbClear(){
+  try{ const d=await sync.idb; if(d) d.close(); }catch(e){}
+  sync.idb=null;
+  await new Promise(r=>{ try{ const q=indexedDB.deleteDatabase(SYNC_IDB); q.onsuccess=q.onerror=q.onblocked=()=>r(); }catch(e){ r(); } });
+}
+
+// Firestore doc -> plain object (Timestamps become milliseconds, so it can be cached)
+function plainDoc(snap){
+  const x=snap.data({serverTimestamps:'none'})||{};
+  for(const k in x){ const v=x[k]; if(v&&typeof v.toMillis==='function') x[k]=v.toMillis(); }
+  x.id=snap.id; return x;
+}
+// Server time of a write in microseconds (the "changed since" point is kept exact,
+// so reopening the app doesn't re-read the documents of the last batch again)
+function tsUs(t){ return t&&typeof t.seconds==='number'?t.seconds*1e6+Math.floor((t.nanoseconds||0)/1e3):0; }
+// tenants/{TID}/{parts|transactions|approvals}/{id} -> {col,id}
+function syncTarget(ref){
+  if(!TID||!ref||typeof ref.path!=='string') return null;
+  const s=ref.path.split('/');
+  return s.length===4&&s[0]==='tenants'&&s[1]===TID&&SYNC_COLS[s[2]]?{col:s[2],id:s[3]}:null;
+}
+// Optimistic local copy of a write (the server copy replaces it when it arrives)
+function localApply(col,id,data,mode,SENT){
+  const m=sync.docs[col]; if(!m||sync.tid!==TID) return;
+  if(mode==='delete'){ if(m[id]){ delete m[id]; syncChanged([col]); } return; }
+  const cur=m[id];
+  if(mode==='update'&&!cur) return;
+  const x=(mode==='set'||!cur)?{id}:{...cur};
+  for(const k of Object.keys(data)){
+    const v=data[k];
+    if(v===undefined||k==='updatedAt') continue;
+    const s=(v&&typeof v==='object'&&SENT)?SENT.get(v):null;
+    const path=mode==='update'?k.split('.'):[k];
+    let o=x; for(let i=0;i<path.length-1;i++){ o[path[i]]=(o[path[i]]&&typeof o[path[i]]==='object')?{...o[path[i]]}:{}; o=o[path[i]]; }
+    const last=path[path.length-1];
+    if(s&&s.inc!=null) o[last]=(Number(o[last])||0)+s.inc;
+    else if(s&&s.del) delete o[last];
+    else if(v&&typeof v==='object'&&typeof v.toMillis==='function') o[last]=v.toMillis();
+    else if(v&&typeof v==='object'&&v.constructor&&v.constructor!==Object&&!Array.isArray(v)) continue; // other sentinels
+    else o[last]=v;
+  }
+  if(cur&&cur.updatedAt&&!x.updatedAt) x.updatedAt=cur.updatedAt;
+  x._local=true;
+  m[id]=x; syncChanged([col]);
+}
+// A write failed: put back what the server has
+async function syncRefetch(list){
+  const F=window._fs;
+  for(const t of list){
+    try{
+      const s=await F.getDoc(F.doc(F.db,t.col,t.id));
+      if(!sync.docs[t.col]) continue;
+      if(s.exists()) sync.docs[t.col][t.id]=plainDoc(s); else delete sync.docs[t.col][t.id];
+      syncChanged([t.col]);
+    }catch(e){}
+  }
+}
+function syncPublish(col){
+  const arr=Object.values(sync.docs[col]||{});
+  if(col==='parts') parts=arr;
+  else if(col==='transactions'){ arr.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); transactions=arr; }
+  else if(col==='approvals'){ arr.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); approvalRequests=arr; }
+}
+// Data changed: publish to the app arrays now, redraw and save a moment later
+function syncChanged(cols){
+  cols.forEach(c=>{ syncPublish(c); sync.dirty.add(c); sync.save.add(c); });
+  if(!sync.t) sync.t=setTimeout(()=>{
+    sync.t=null; const d=[...sync.dirty]; sync.dirty.clear();
+    if(d.includes('parts')||d.includes('transactions')) refresh();
+    if(d.includes('approvals')&&typeof renderApprovalList==='function'){ renderApprovalList(); updateApprovalBadge(); }
+  },40);
+  syncSaveSoon();
+}
+function syncSaveSoon(){ clearTimeout(sync.saveT); sync.saveT=setTimeout(syncSaveNow,800); }
+async function syncSaveNow(){
+  clearTimeout(sync.saveT);
+  const t=sync.tid; if(!t||t!==TID) return;
+  const cols=[...sync.save]; sync.save.clear();
+  for(const col of cols) if(sync.docs[col]&&sync.meta[col])
+    await idbPut(t+'/'+col,{v:SYNC_V,docs:Object.values(sync.docs[col]),...sync.meta[col]});
+  if(sync.meta._del) await idbPut(t+'/_deletions',{v:SYNC_V,lastDel:sync.meta._del.lastDel});
+}
+
+// Full read of one collection (first open on this device, or the periodic safety net)
+async function syncFull(col){
+  const F=window._fs, cfg=SYNC_COLS[col], c=F.collection(F.db,col), started=Date.now();
+  const from=cfg.windowDays?started-cfg.windowDays*DAY_MS:0;
+  const qs=[F.getDocs(from?F.query(c,F.where('createdAt','>=',from)):c)];
+  // Pending requests are always needed, however old
+  if(col==='approvals') qs.push(F.getDocs(F.query(c,F.where('status','==','pending'))));
+  const snaps=await Promise.all(qs);
+  const m={}; let last=0, offline=false;
+  snaps.forEach(s=>{ if(s.metadata.fromCache) offline=true; s.docs.forEach(d=>{ m[d.id]=plainDoc(d); last=Math.max(last,tsUs(d.get('updatedAt'))); sync.stats.serverDocs++; }); });
+  sync.docs[col]=m;
+  // fullAt 0 when offline: try a proper full read next time
+  sync.meta[col]={lastSyncUs:last,fullAt:offline?0:started,windowFrom:from};
+  sync.stats.full.push(col);
+}
+// Live listener for documents changed since the newest server time seen
+function syncListen(col){
+  const F=window._fs, myTid=TID;
+  const us=sync.meta[col].lastSyncUs||0;
+  const q=F.query(F.collection(F.db,col),F.where('updatedAt','>',new F.Timestamp(Math.floor(us/1e6),(us%1e6)*1000)));
+  sync.unsubs.push(F.onSnapshot(q,snap=>{
+    if(TID!==myTid||sync.tid!==myTid) return;
+    let n=0;
+    snap.docChanges().forEach(ch=>{
+      // "removed" = our own pending write (updatedAt not set yet); it comes back once saved
+      if(ch.type==='removed'||ch.doc.metadata.hasPendingWrites) return;
+      const x=plainDoc(ch.doc); if(!x.updatedAt) return;
+      if(!snap.metadata.fromCache) sync.stats.deltaDocs++;
+      const cur=sync.docs[col][x.id];
+      sync.meta[col].lastSyncUs=Math.max(sync.meta[col].lastSyncUs||0,tsUs(ch.doc.get('updatedAt')));
+      if(cur&&!cur._local&&(cur.updatedAt||0)>x.updatedAt) return;
+      sync.docs[col][x.id]=x; n++;
+    });
+    if(n) syncChanged([col]); else { sync.save.add(col); syncSaveSoon(); }
+  },e=>console.warn('Sync '+col+':',e.code||e.message)));
+}
+function syncListenDeletions(){
+  const F=window._fs, myTid=TID;
+  const q=F.query(F.collection(F.db,'deletions'),F.where('deletedAt','>=',F.Timestamp.fromMillis(sync.meta._del.lastDel)));
+  sync.unsubs.push(F.onSnapshot(q,snap=>{
+    if(TID!==myTid||sync.tid!==myTid) return;
+    const touched=new Set();
+    snap.docChanges().forEach(ch=>{
+      if(ch.type==='removed'||ch.doc.metadata.hasPendingWrites) return;
+      const x=plainDoc(ch.doc); if(!SYNC_COLS[x.col]||!x.deletedAt) return;
+      if(x.deletedAt>sync.meta._del.lastDel) sync.meta._del.lastDel=x.deletedAt;
+      const cur=sync.docs[x.col][x.docId];
+      // Keep a doc written after the deletion (e.g. a trial slot that was reused)
+      if(cur&&!cur._local&&!((cur.updatedAt||0)>x.deletedAt)){ delete sync.docs[x.col][x.docId]; touched.add(x.col); }
+    });
+    if(touched.size) syncChanged([...touched]); else syncSaveSoon();
+  },e=>console.warn('Sync deletions:',e.code||e.message)));
+}
+function stopSync(){ sync.unsubs.forEach(u=>{try{u();}catch(e){}}); sync.unsubs=[]; }
+// Full-read whatever is missing or due, then listen for changes
+async function attachSync(){
+  const myTid=TID, now=Date.now();
+  stopSync();
+  for(const col of Object.keys(SYNC_COLS)){
+    const meta=sync.meta[col];
+    if(!sync.docs[col]||!meta||!meta.fullAt||now-meta.fullAt>=SYNC_COLS[col].fullEvery){
+      await syncFull(col); if(TID!==myTid) return; sync.save.add(col);
+    }
+  }
+  if(TID!==myTid) return;
+  Object.keys(SYNC_COLS).forEach(syncPublish);
+  refresh(); if(typeof renderApprovalList==='function'){ renderApprovalList(); updateApprovalBadge(); }
+  Object.keys(SYNC_COLS).forEach(syncListen);
+  syncListenDeletions();
+  syncSaveSoon();
+}
+async function startSync(){
+  stopSync();
+  sync.tid=TID; sync.docs={}; sync.meta={}; sync.save.clear();
+  sync.stats={cacheDocs:0,serverDocs:0,deltaDocs:0,full:[]};
+  const myTid=TID;
+  for(const col of Object.keys(SYNC_COLS)){
+    const c=await idbGet(myTid+'/'+col);
+    if(c&&c.v===SYNC_V&&Array.isArray(c.docs)){
+      const m={}; c.docs.forEach(d=>{ m[d.id]=d; }); sync.docs[col]=m;
+      sync.meta[col]={lastSyncUs:c.lastSyncUs||0,fullAt:c.fullAt||0,windowFrom:c.windowFrom||0};
+      sync.stats.cacheDocs+=c.docs.length;
+    }
+  }
+  const dm=await idbGet(myTid+'/_deletions');
+  // No deletion marker yet: start a little in the past to allow for clock drift
+  sync.meta._del={lastDel:(dm&&dm.v===SYNC_V&&dm.lastDel)||Date.now()-10*60e3};
+  if(TID!==myTid) return;
+  // Show cached data straight away, then catch up with the server
+  if(sync.docs.parts){ Object.keys(sync.docs).forEach(syncPublish); refresh(); }
+  await attachSync();
+}
+// Coming back after a long time in the background: restart the listeners from
+// the newest change seen, so the resume doesn't re-download what changed meanwhile twice
+document.addEventListener('visibilitychange',()=>{
+  if(!useCloud||!TID||!sync.tid) return;
+  if(document.visibilityState==='hidden'){ sync.hiddenAt=Date.now(); syncSaveNow(); }
+  else if(sync.hiddenAt&&Date.now()-sync.hiddenAt>15*60e3){ sync.hiddenAt=0; attachSync().catch(e=>console.warn('Resync failed',e)); }
+});
+
+// Transactions older than the loaded window, on demand
+function txnWindowFrom(){ return (sync.meta.transactions&&sync.meta.transactions.windowFrom)||0; }
+async function loadTxnHistory(fromMs){
+  if(!useCloud||!sync.docs.transactions) return 0;
+  const cur=txnWindowFrom(); fromMs=Math.max(0,fromMs||0);
+  if(!cur||fromMs>=cur) return 0;
+  const F=window._fs, c=F.collection(F.db,'transactions');
+  const conds=[F.where('createdAt','<',cur)]; if(fromMs) conds.push(F.where('createdAt','>=',fromMs));
+  const s=await F.getDocs(F.query(c,...conds));
+  s.docs.forEach(d=>{ if(!sync.docs.transactions[d.id]) sync.docs.transactions[d.id]=plainDoc(d); sync.stats.serverDocs++; });
+  sync.meta.transactions.windowFrom=fromMs;
+  syncChanged(['transactions']);
+  return s.size;
+}
+// Make sure transactions from `dateStr` (yyyy-mm-dd, '' = all) are loaded. A month of
+// margin covers entries whose date was typed earlier than the day they were saved.
+async function ensureTxnFrom(dateStr){
+  if(!useCloud) return true;
+  const cur=txnWindowFrom(); if(!cur) return true;
+  const want=dateStr?Math.max(0,Date.parse(dateStr)-31*DAY_MS):0;
+  if(want>=cur) return true;
+  toast('Loading older transactions...');
+  try{ await loadTxnHistory(want); return true; }
+  catch(e){ toast('Could not load older transactions: '+(e.code||e.message)); return false; }
+}
+async function loadFullHistory(){
+  const cur=txnWindowFrom(); if(!cur){ toast('Full history is already loaded'); return; }
+  let n='';
+  try{ const F=window._fs; n=(await F.getCountFromServer(F.query(F.collection(F.db,'transactions'),F.where('createdAt','<',cur)))).data().count; }catch(e){}
+  if(!confirm('Load '+(n===''?'all older':n)+' older transaction(s) onto this device?'+(n!==''?'\n\nThis uses '+n+' Firestore reads once; after that they stay cached.':''))) return;
+  try{ const k=await loadTxnHistory(0); toast('Loaded '+k+' older transaction(s) ✓'); }
+  catch(e){ toast('Could not load history: '+(e.code||e.message)); }
 }
 
 function listenCloud(){
-  const {collection,onSnapshot,query,orderBy,db}=window._fs;
-  onSnapshot(collection(db,'parts'),snap=>{parts=snap.docs.map(d=>({...d.data(),id:d.id}));refresh();});
-  // Auto-reload when tab becomes visible (e.g. returning from background)
-  document.removeEventListener('visibilitychange', window._visHandler||null);
-  window._visHandler = ()=>{ if(document.visibilityState==='visible' && useCloud){ loadAllCloud(); } };
-  document.addEventListener('visibilitychange', window._visHandler);
   // Auto-refresh login page every 60s if still on login screen
   if(window._loginRefresh) clearInterval(window._loginRefresh);
   window._loginRefresh = setInterval(()=>{
     const ls = document.getElementById('login-screen');
     if(ls && ls.style.display!=='none') location.reload();
   }, 60000);
-  onSnapshot(query(collection(db,'transactions'),orderBy('createdAt','asc')),snap=>{transactions=snap.docs.map(d=>({...d.data(),id:d.id}));refresh();});
-  onSnapshot(query(collection(db,'approvals'),orderBy('createdAt','desc')),snap=>{
-    approvalRequests=snap.docs.map(d=>({...d.data(),id:d.id}));
-    renderApprovalList();updateApprovalBadge();
-  });
+}
+
+// ── STOCK ALERT STATE ─────────────────────────
+// Each part remembers the last alert sent (stockAlert: null | 'near' | 'low').
+// ntfy is sent only when a part gets worse (OK -> Near Finish -> Low Stock), once,
+// and the state resets when stock is back above min. It is written in the same
+// batch as the stock change, so every device agrees on it.
+const ALERT_RANK={near:1,low:2};
+function alertLevel(p){ const s=stockStatus(p); return s==='low'||s==='near'?s:null; }
+// Returns {patch, alert}: patch for the part doc, alert = part to notify about (or null)
+function alertPatch(p,next){
+  const after={...p,...next}, lvl=alertLevel(after), prev=p.stockAlert||null;
+  if(lvl===prev) return {patch:{},alert:null};
+  return {patch:{stockAlert:lvl},alert:(ALERT_RANK[lvl]||0)>(ALERT_RANK[prev]||0)?after:null};
+}
+function sendStockAlerts(list){
+  list=(list||[]).filter(Boolean);
+  if(!list.length) return;
+  const nLow=list.filter(p=>stockStatus(p)==='low').length;
+  sendLowStockNtfy(list,(list.length===1?'1 part':list.length+' parts')+' just reached '+(nLow===list.length?'Low Stock':nLow?'Low Stock / Near Finish':'Near Finish'));
 }
 
 function loadLocal(){
@@ -1963,6 +2265,8 @@ function renderTxn(){
   const q=(document.getElementById('s-txn').value||'').toLowerCase();
   let list=[...transactions].reverse();
   if(q) list=list.filter(t=>(t.partName+t.note+t.user+t.type).toLowerCase().includes(q));
+  const TXN_SHOW=300, more=list.length-TXN_SHOW;
+  if(more>0) list=list.slice(0,TXN_SHOW);
   const el=document.getElementById('txn-list');
   if(!list.length){el.innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg>No transactions yet</div>';return;}
   el.innerHTML=list.map(t=>{
@@ -1981,7 +2285,7 @@ function renderTxn(){
       </div>
       <div class="txn-qty" style="${qtyColor}">${qtyLabel}</div>
     </div>`;
-  }).join('');
+  }).join('')+(more>0?`<div style="font-size:12px;color:var(--text3);text-align:center;padding:10px">Showing the latest ${TXN_SHOW} of ${TXN_SHOW+more}. Search to find older ones.</div>`:'');
 }
 
 function renderAlerts(){
@@ -1997,18 +2301,12 @@ function renderAlerts(){
       <div class="alert-info">Stock: ${p.qty} ${p.unit} - Min: ${p.min} ${p.unit}<br>Code: ${p.code||'-'} · Rack: ${p.loc||'-'}</div>
     </div>
   </div>`).join('');
-  setTimeout(()=>sendLowStockNtfy(reorderParts()),3000);
 }
 
-function sendLowStockNtfy(lowParts){
+// ntfy summary of parts that need reordering. Sent by sendStockAlerts() when a
+// part gets worse, or on demand by an admin from the Alert tab. Never on app open.
+function sendLowStockNtfy(lowParts,headline){
   if(!lowParts||!lowParts.length) return;
-  const today=new Date().toISOString().slice(0,10);
-  const lastSent=localStorage.getItem(tenantKey('sp_ntfy_alert_date'));
-  if(lastSent===today) return;
-  const currentLow=reorderParts();
-  const finalLow=currentLow.length>=lowParts.length?currentLow:lowParts;
-  lowParts=finalLow;
-  if(!lowParts.length) return;
   const maxShow=5;
   const shown=lowParts.slice(0,maxShow);
   const extra=lowParts.length-maxShow;
@@ -2017,12 +2315,19 @@ function sendLowStockNtfy(lowParts){
   ).join('\n\n');
   const extraLine=extra>0?'\n\n[+'+extra+' more parts]':'';
   const nLow=lowParts.filter(p=>stockStatus(p)==='low').length;
-  const msg=lowParts.length+' parts need reorder ('+nLow+' out of stock, '+(lowParts.length-nLow)+' below min stock)\n-------------------------\n\n'+partLines+extraLine+'\n\n-> Open SpareTrack to reorder';
-  ntfySend({title:'LOW STOCK ALERT - '+tenantName(),priority:'high',tags:'warning,red_circle'},msg);
-  localStorage.setItem(tenantKey('sp_ntfy_alert_date'),today);
+  const head=headline||(lowParts.length+' parts need reorder ('+nLow+' out of stock, '+(lowParts.length-nLow)+' below min stock)');
+  const msg=head+'\n-------------------------\n\n'+partLines+extraLine+'\n\n-> Open SpareTrack to reorder';
+  return ntfySend({title:'LOW STOCK ALERT - '+tenantName(),priority:'high',tags:'warning,red_circle'},msg);
+}
+async function sendLowStockSummary(){
+  const list=reorderParts();
+  if(!list.length){toast('No parts need reorder');return;}
+  await sendLowStockNtfy(list);
+  toast('Low-stock summary sent ('+list.length+' parts) ✓');
 }
 
 function renderStats(){
+  const wf=useCloud&&typeof txnWindowFrom==='function'?txnWindowFrom():0;
   const totalIn=transactions.filter(t=>t.type==='in').reduce((a,t)=>a+t.qty,0);
   const totalOut=transactions.filter(t=>t.type==='out').reduce((a,t)=>a+t.qty,0);
   document.getElementById('stat-grid').innerHTML=`
@@ -2031,7 +2336,8 @@ function renderStats(){
     <div class="stat"><div class="slabel">Near Finish</div><div class="sval amber">${parts.filter(p=>stockStatus(p)==='near').length}</div></div>
     <div class="stat"><div class="slabel">Over Stock</div><div class="sval indigo">${parts.filter(p=>stockStatus(p)==='over').length}</div></div>
     <div class="stat"><div class="slabel">Total IN</div><div class="sval green">${totalIn}</div></div>
-    <div class="stat"><div class="slabel">Total OUT</div><div class="sval">${totalOut}</div></div>`;
+    <div class="stat"><div class="slabel">Total OUT</div><div class="sval">${totalOut}</div></div>`+
+    (wf?`<div style="grid-column:1/-1;font-size:12px;color:var(--text2);display:flex;gap:10px;align-items:center;flex-wrap:wrap">IN / OUT since ${new Date(wf).toLocaleDateString('en-MY')} (older history is not loaded on this device)<button class="act" onclick="loadFullHistory()">Load full history</button></div>`:'');
 }
 
 function openAdd(){
@@ -2078,11 +2384,18 @@ async function savePart(){
     supplier:document.getElementById('f-supplier').value.trim(),
     leadtime:document.getElementById('f-leadtime').value.trim(),
   };
+  if(data.qty<0||data.min<0){toast('Stock and min stock cannot be negative');return;}
   if(useCloud){
-    const {collection,addDoc,setDoc,doc,db}=window._fs;
+    const {collection,addDoc,updateDoc,doc,db}=window._fs;
     try{
-      if(editId){await setDoc(doc(db,'parts',editId),data);toast('Part updated ✓');}
-      else{await addDoc(collection(db,'parts'),data);toast('Part added ✓');}
+      if(editId){
+        const a=alertPatch(parts.find(x=>x.id==editId)||{},data);
+        // update, not set: keeps fields the form doesn't show (image, alert state)
+        await updateDoc(doc(db,'parts',editId),{...data,...a.patch});
+        sendStockAlerts([a.alert]);
+        toast('Part updated ✓');
+      }
+      else{await addDoc(collection(db,'parts'),{...data,stockAlert:alertLevel(data)});toast('Part added ✓');}
     }catch(e){
       toast(e.code==='limit/parts'?e.message:'Could not save part: '+(e.code||e.message));
       return;
@@ -2176,11 +2489,15 @@ async function saveTxn(){
       partName:p.name, createdAt:Date.now()
     };
     if(useCloud){
-      const {collection,addDoc,setDoc,doc,db}=window._fs;
-      await Promise.all([
-        addDoc(collection(db,'transactions'),txnData),
-        setDoc(doc(db,'parts',pid),{...p,qty:newQty})
-      ]);
+      // Movement record + stock change in one atomic batch. increment() adds to
+      // whatever the server holds, so two people booking at once are both counted
+      // (the rules refuse a result below 0). Only qty/alert fields are written.
+      const F=window._fs, b=F.writeBatch(F.db);
+      const a=alertPatch(p,{qty:newQty});
+      b.set(F.newDoc('transactions'),txnData);
+      b.update(F.doc(F.db,'parts',pid),{qty:F.increment(isIncrease?qty:-qty),...a.patch});
+      await b.commit();
+      sendStockAlerts([a.alert]);
     } else {
       p.qty=newQty;
       transactions.push({...txnData,id:'t'+Date.now()});
@@ -2195,7 +2512,7 @@ async function saveTxn(){
   } catch(err){
     console.error('saveTxn error:',err);
     let msg = err.message||'Please try again';
-    if(msg.includes('permission')||msg.includes('PERMISSION')) msg='Firebase permission denied. Check Firestore Rules.';
+    if(msg.includes('permission')||msg.includes('PERMISSION')) msg=type==='out'?'Not enough stock — it may have just changed on another device.':'Firebase permission denied. Check Firestore Rules.';
     if(msg.includes('offline')||msg.includes('unavailable')) msg='No internet. Data will sync when back online.';
     toast('Error: '+msg);
   } finally {
@@ -2410,7 +2727,7 @@ function importExcel(input){
           cat:      colIdx.cat      >= 0 ? (row[colIdx.cat]||'').toString().trim() : '',
           loc:      colIdx.loc      >= 0 ? (row[colIdx.loc]||'').toString().trim() : '',
           unit:     colIdx.unit     >= 0 ? (row[colIdx.unit]||'').toString().trim() || 'pcs' : 'pcs',
-          qty:      colIdx.qty      >= 0 ? parseInt(row[colIdx.qty])||0 : 0,
+          qty:      colIdx.qty      >= 0 ? Math.max(0,parseInt(row[colIdx.qty])||0) : 0,
           min:      colIdx.min      >= 0 ? parseInt(row[colIdx.min])||0 : 0,
           max:      colIdx.max      >= 0 ? (parseInt(row[colIdx.max])||null) : null,
           supplier: colIdx.supplier >= 0 ? (row[colIdx.supplier]||'').toString().trim() : '',
@@ -2462,60 +2779,66 @@ function importExcel(input){
   reader.readAsBinaryString(file);
 }
 
+const MAX_IMPORT_ROWS = 5000;
 async function confirmExcelImport(){
   if(!excelImportData.length) return;
   const total = excelImportData.length;
-  let added = 0, updated = 0, skipped = 0;
+  let added = 0, updated = 0, skipped = 0, unchanged = 0;
 
   if(useCloud){
-    const {collection, addDoc, setDoc, getDocs, doc, db} = window._fs;
-    toast('Importing '+total+' parts...');
-
-    // Load existing parts to check for duplicates
-    const snap = await getDocs(collection(db,'parts'));
-    const existing = [];
-    snap.forEach(d => existing.push({id:d.id, ...d.data()}));
-
-    for(const p of excelImportData){
-      const {id, ...data} = p;
-      // Match by part code first, then by name if no code
-      const match = data.code
-        ? existing.find(x => x.code && x.code.trim().toLowerCase() === data.code.trim().toLowerCase())
-        : existing.find(x => x.name && x.name.trim().toLowerCase() === data.name.trim().toLowerCase());
-
+    const F = window._fs;
+    // Same part twice in the file (same code, or same name when there is no code): last row wins
+    const keyOf = x => x.code ? 'c:'+String(x.code).trim().toLowerCase() : 'n:'+String(x.name||'').trim().toLowerCase();
+    const rows = [...new Map(excelImportData.map(r => [keyOf(r), r])).values()];
+    if(rows.length > MAX_IMPORT_ROWS){
+      toast(`This file has ${rows.length} parts. Import at most ${MAX_IMPORT_ROWS} at a time — split the file.`);
+      return;
+    }
+    // Match against the parts already on this device (no extra reads):
+    // by part code first, then by name if the row has no code
+    const byCode = new Map(), byName = new Map();
+    parts.forEach(x => {
+      if(x.code) byCode.set(String(x.code).trim().toLowerCase(), x);
+      if(x.name) byName.set(String(x.name).trim().toLowerCase(), x);
+    });
+    const on = k => !!document.getElementById('upd-'+k)?.checked;
+    const writes = [], alerts = [];
+    for(const r of rows){
+      const {id, ...data} = r;
+      const match = data.code ? byCode.get(String(data.code).trim().toLowerCase()) : byName.get(String(data.name).trim().toLowerCase());
       if(match){
-        // Read checkbox selections
-        const updQty      = document.getElementById('upd-qty')?.checked;
-        const updMin      = document.getElementById('upd-min')?.checked;
-        const updMax      = document.getElementById('upd-max')?.checked;
-        const updCat      = document.getElementById('upd-cat')?.checked;
-        const updLoc      = document.getElementById('upd-loc')?.checked;
-        const updSupplier = document.getElementById('upd-supplier')?.checked;
-        const updLeadtime = document.getElementById('upd-leadtime')?.checked;
-        const updCost     = document.getElementById('upd-cost')?.checked;
-
-        // UPDATE existing — only checked fields
-        await setDoc(doc(db,'parts',match.id), {
-          ...match,
-          name:     data.name     || match.name,
-          code:     data.code     || match.code,
-          unit:     data.unit     || match.unit,
-          qty:      updQty      ? (data.qty      !== undefined ? data.qty      : match.qty)      : match.qty,
-          min:      updMin      ? (data.min      !== undefined ? data.min      : match.min)      : match.min,
-          max:      updMax      ? (data.max      !== undefined ? data.max      : match.max)      : match.max,
-          cat:      updCat      ? (data.cat      || match.cat)      : match.cat,
-          loc:      updLoc      ? (data.loc      || match.loc)      : match.loc,
-          supplier: updSupplier ? (data.supplier || match.supplier) : match.supplier,
-          leadtime: updLeadtime ? (data.leadtime || match.leadtime) : match.leadtime,
-          cost:     updCost     ? (data.cost     !== undefined ? data.cost     : match.cost)     : match.cost,
-        });
+        // UPDATE existing — name/code/unit plus the checked fields, and only what changes
+        const next = {name: data.name || match.name, code: data.code || match.code, unit: data.unit || match.unit};
+        for(const k of ['qty','min','max','cost']) if(on(k) && data[k] !== undefined) next[k] = data[k];
+        for(const k of ['cat','loc','supplier','leadtime']) if(on(k) && data[k]) next[k] = data[k];
+        const patch = {};
+        for(const k in next) if(next[k] !== undefined && next[k] !== match[k] && !(next[k] == null && match[k] == null)) patch[k] = next[k];
+        if(!Object.keys(patch).length){ unchanged++; continue; }
+        const a = alertPatch(match, patch); alerts.push(a.alert);
+        const ref = F.doc(F.db,'parts',match.id), d = {...patch, ...a.patch};
+        writes.push(b => b.update(ref, d));
         updated++;
       } else {
         // ADD new part (skipped once the plan's part limit is reached)
-        try{ await addDoc(collection(db,'parts'), data); added++; }
-        catch(e){ if(e.code==='limit/parts'){ skipped++; continue; } throw e; }
+        let ref;
+        if(partLimit()){ const sid = nextPartSlot(); if(!sid){ skipped++; continue; } ref = F.doc(F.db,'parts',sid); }
+        else ref = F.newDoc('parts');
+        const d = {...data, stockAlert: alertLevel(data)};
+        writes.push(b => b.set(ref, d));
+        added++;
       }
     }
+    if(writes.length > 1000 && !confirm(`This import writes ${writes.length} parts to the database.\n\nThe free Firebase plan allows 20,000 writes per day. Continue?`)) return;
+    // Batched writes: max 500 operations per batch, 400 to leave room
+    const CHUNK = 400;
+    for(let i = 0; i < writes.length; i += CHUNK){
+      const b = F.writeBatch(F.db);
+      writes.slice(i, i+CHUNK).forEach(f => f(b));
+      try{ await b.commit(); }
+      catch(e){ toast(`Import stopped after ${i} of ${writes.length} parts: `+(e.code||e.message)); return; }
+      if(writes.length > CHUNK) toast(`Importing... ${Math.min(i+CHUNK, writes.length)} / ${writes.length}`);
+    }
+    sendStockAlerts(alerts);
   } else {
     // Local mode upsert
     for(const p of excelImportData){
@@ -2559,7 +2882,7 @@ async function confirmExcelImport(){
 
   closeM('m-excel-preview');
   excelImportData = [];
-  toast(`Import done ✓ — ${added} added, ${updated} updated`+(skipped?` · ${skipped} skipped (plan limit ${partLimit()} parts)`:''));
+  toast(`Import done ✓ — ${added} added, ${updated} updated`+(unchanged?`, ${unchanged} unchanged`:'')+(skipped?` · ${skipped} skipped (plan limit ${partLimit()} parts)`:''));
   // Switch to inventory tab
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
@@ -2688,7 +3011,8 @@ function exportCSV(type){
   toast('Export successful ✓');
 }
 
-function exportJSON(){
+async function exportJSON(){
+  if(!await ensureTxnFrom('')) return;
   const data={parts,transactions,exported:new Date().toISOString(),version:'1.0'};
   dl(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),'sparetrack_backup_'+new Date().toISOString().slice(0,10)+'.json');
   toast('Backup successful ✓');
@@ -3067,17 +3391,27 @@ async function finalizeStocktake(){
   const unverified=stkSession.items.filter(i=>!i.verified).length;
   if(!confirm(`Finalize stocktake?\n\n${verified.length} verified · ${withDiff.length} variance · ${unverified} not verified\n\nStock for ${withDiff.length} part(s) will be adjusted.`))return;
 
-  for(const item of withDiff){
+  if(useCloud){
+    // Counted quantity (absolute) + an adjustment record per part, 200 parts per batch
+    const F=window._fs, alerts=[];
+    for(let i=0;i<withDiff.length;i+=200){
+      const b=F.writeBatch(F.db);
+      for(const item of withDiff.slice(i,i+200)){
+        const p=parts.find(x=>x.id==item.partId);if(!p)continue;
+        const note=`Stocktake adjustment (${item.systemQty} -> ${item.actualQty})`;
+        const a=alertPatch(p,{qty:item.actualQty}); alerts.push(a.alert);
+        b.update(F.doc(F.db,'parts',item.partId),{qty:item.actualQty,...a.patch});
+        b.set(F.newDoc('transactions'),{partId:item.partId,partName:item.partName,type:item.variance>0?'in':'out',qty:Math.abs(item.variance),date:stkSession.date,note,user:'Stocktake',createdAt:Date.now()});
+      }
+      try{ await b.commit(); }
+      catch(e){ toast('Could not save stocktake: '+(e.code||e.message)); return; }
+    }
+    sendStockAlerts(alerts);
+  } else for(const item of withDiff){
     const p=parts.find(x=>x.id==item.partId);if(!p)continue;
     const note=`Stocktake adjustment (${item.systemQty} -> ${item.actualQty})`;
-    if(useCloud){
-      const {collection,addDoc,setDoc,doc,db}=window._fs;
-      await setDoc(doc(db,'parts',item.partId),{...p,qty:item.actualQty});
-      await addDoc(collection(db,'transactions'),{partId:item.partId,partName:item.partName,type:item.variance>0?'in':'out',qty:Math.abs(item.variance),date:stkSession.date,note,user:'Stocktake',createdAt:Date.now()});
-    } else {
-      p.qty=item.actualQty;
-      transactions.push({id:'stk_'+Date.now()+'_'+item.partId,partId:item.partId,partName:item.partName,type:item.variance>0?'in':'out',qty:Math.abs(item.variance),date:stkSession.date,note,user:'Stocktake',createdAt:Date.now()});
-    }
+    p.qty=item.actualQty;
+    transactions.push({id:'stk_'+Date.now()+'_'+item.partId,partId:item.partId,partName:item.partName,type:item.variance>0?'in':'out',qty:Math.abs(item.variance),date:stkSession.date,note,user:'Stocktake',createdAt:Date.now()});
   }
 
   const record={...stkSession,finishedAt:new Date().toISOString(),totalParts:stkSession.items.length,verified:verified.length,matched:verified.filter(i=>i.variance===0).length,variances:withDiff.length,unverified};
@@ -3145,9 +3479,11 @@ function stkScanFrame(){
 function handleStkScan(data){
   clearInterval(stkScanInterval);
   try{
-    const obj=JSON.parse(data);
-    if(obj.app!=='sparetrack')throw new Error();
-    const item=stkSession&&stkSession.items.find(i=>i.partId==obj.id);
+    let pid;
+    data=String(data||'');
+    if(data.startsWith('ST:')) pid=data.slice(3).trim();
+    else{ const obj=JSON.parse(data); if(obj.app!=='sparetrack')throw new Error(); pid=obj.id; }
+    const item=stkSession&&stkSession.items.find(i=>i.partId==pid);
     if(!item)throw new Error();
     closeStkScanner(); openVerify(item.partId);
   }catch(e){
@@ -3267,6 +3603,7 @@ async function doLogout(){
   // Remove this company's cached data from the device before the next user signs in
   try{ ['sp_parts','sp_txn','sp_stk','sp_ntfy_alert_date'].forEach(k=>localStorage.removeItem(tenantKey(k))); }catch(e){}
   try{ const f=window._fs; await f.terminate(f.db); await f.clearIndexedDbPersistence(f.db); }catch(e){}
+  try{ stopSync(); sync.tid=null; await idbClear(); }catch(e){}
   location.reload();
 }
 
@@ -3408,21 +3745,26 @@ function scanQuickTxn(type){
 
 // Update scan result buttons based on role
 const _origHandleScan=window.handleScan;
-window.handleScan=function(data){
+// "ST:<partId>" is the document id: look it up in the local list (no read), and
+// only if it isn't there (e.g. added on another phone a moment ago) read that one doc.
+async function findScannedPart(data){
+  data=String(data||'');
+  let pid=null, code=null;
+  if(data.startsWith('ST:')) pid=data.slice(3).trim();
+  else{ const obj=JSON.parse(data); if(obj.app!=='sparetrack') return null; pid=obj.id!=null?String(obj.id):null; code=obj.code||null; }
+  let p=(pid&&parts.find(x=>x.id==pid))||(code&&parts.find(x=>x.code&&x.code==code))||null;
+  if(!p&&pid&&useCloud&&/^[A-Za-z0-9_-]{1,128}$/.test(pid)){
+    try{
+      const F=window._fs, snap=await F.getDoc(F.doc(F.db,'parts',pid));
+      if(snap.exists()){ p=plainDoc(snap); if(sync.docs.parts&&!sync.docs.parts[pid]){ sync.docs.parts[pid]=p; syncChanged(['parts']); } }
+    }catch(e){}
+  }
+  return p;
+}
+window.handleScan=async function(data){
   clearInterval(scanInterval);
   try{
-    let p=null;
-    // Support both formats:
-    // New: ST:partId
-    // Old: {"app":"sparetrack","id":"..."}
-    if(data.startsWith('ST:')){
-      const pid=data.slice(3);
-      p=parts.find(x=>x.id==pid);
-    } else {
-      const obj=JSON.parse(data);
-      if(obj.app!=='sparetrack') throw new Error('not a SpareTrack QR');
-      p=parts.find(x=>x.id==obj.id)||parts.find(x=>x.code==obj.code&&x.code);
-    }
+    const p=await findScannedPart(data);
     if(!p) throw new Error('part not found');
     scannedPartId=p.id;
     document.getElementById('scan-status').textContent='✓ Part found!';
@@ -3469,12 +3811,9 @@ let apvFilter = 'pending';
 
 function loadApprovals(){
   if(useCloud){
-    const {collection,onSnapshot,query,orderBy,db}=window._fs;
-    onSnapshot(query(collection(db,'approvals'),orderBy('createdAt','desc')),snap=>{
-      approvalRequests=snap.docs.map(d=>({...d.data(),id:d.id}));
-      renderApprovalList();
-      updateApprovalBadge();
-    });
+    // Kept up to date by the sync engine; no second listener
+    renderApprovalList();
+    updateApprovalBadge();
   } else {
     try{approvalRequests=JSON.parse(localStorage.getItem('sp_approvals')||'[]');}catch(e){approvalRequests=[];}
     renderApprovalList();
@@ -3546,6 +3885,7 @@ function renderApprovalList(){
 
 async function approveRequest(reqId){
   const req=approvalRequests.find(r=>r.id===reqId);if(!req)return;
+  if(req.status&&req.status!=='pending'){toast('This request was already handled');return;}
   const p=parts.find(x=>x.id==req.partId);
   const txnType = req.txnType || 'out'; // legacy requests = out
   const isIncrease = txnType==='in' || txnType==='return';
@@ -3555,12 +3895,16 @@ async function approveRequest(reqId){
   const txnData={partId:req.partId,type:txnType,qty:req.qty,date:req.date,note:req.note+' [Approved by '+approvedBy+']',user:req.requestedBy,partName:req.partName,approvedBy,approvalId:reqId,createdAt:Date.now()};
 
   if(useCloud){
-    const {collection,addDoc,setDoc,doc,db}=window._fs;
-    await Promise.all([
-      setDoc(doc(db,'approvals',reqId),{...req,status:'approved',approvedBy,approvedAt:Date.now()}),
-      addDoc(collection(db,'transactions'),txnData),
-      p?setDoc(doc(db,'parts',req.partId),{...p,qty:newQty}):Promise.resolve()
-    ]);
+    // Status + movement + stock change in one atomic batch. The rules only let a
+    // still-pending request be approved, so two approvers can't book it twice.
+    const F=window._fs, b=F.writeBatch(F.db);
+    const a=p?alertPatch(p,{qty:newQty}):{patch:{},alert:null};
+    b.update(F.doc(F.db,'approvals',reqId),{status:'approved',approvedBy,approvedAt:Date.now()});
+    b.set(F.newDoc('transactions'),txnData);
+    if(p) b.update(F.doc(F.db,'parts',req.partId),{qty:F.increment(isIncrease?req.qty:-req.qty),...a.patch});
+    try{ await b.commit(); }
+    catch(e){ toast('Could not approve: '+(e.code==='permission-denied'?'not enough stock, or the request was already handled':(e.code||e.message))); return; }
+    sendStockAlerts([a.alert]);
   } else {
     const i=approvalRequests.findIndex(r=>r.id===reqId);
     approvalRequests[i]={...req,status:'approved',approvedBy,approvedAt:Date.now()};
@@ -3590,8 +3934,9 @@ async function confirmReject(){
   const rejectedBy=currentUser?currentUser.name||currentUser.email:'';
 
   if(useCloud){
-    const {setDoc,doc,db}=window._fs;
-    await setDoc(doc(db,'approvals',reqId),{...req,status:'rejected',rejectedBy,rejectReason:reason,rejectedAt:Date.now()});
+    const {updateDoc,doc,db}=window._fs;
+    try{ await updateDoc(doc(db,'approvals',reqId),{status:'rejected',rejectedBy,rejectReason:reason,rejectedAt:Date.now()}); }
+    catch(e){ toast('Could not reject: '+(e.code==='permission-denied'?'the request was already handled':(e.code||e.message))); return; }
   } else {
     const i=approvalRequests.findIndex(r=>r.id===reqId);
     approvalRequests[i]={...req,status:'rejected',rejectedBy,rejectReason:reason,rejectedAt:Date.now()};
@@ -3676,8 +4021,8 @@ function handleImageUpload(input){
       const p=parts.find(x=>x.id==partId);if(!p)return;
       p.img=compressed;
       if(useCloud){
-        const {setDoc,doc,db}=window._fs;
-        await setDoc(doc(db,'parts',partId),{...p});
+        const {updateDoc,doc,db}=window._fs;
+        await updateDoc(doc(db,'parts',partId),{img:compressed});
       } else {
         saveLocal();
       }
@@ -3699,9 +4044,8 @@ async function removePartImage(partId){
   const p=parts.find(x=>x.id==partId);if(!p)return;
   delete p.img;
   if(useCloud){
-    const {setDoc,doc,db}=window._fs;
-    const {img,...rest}=p;
-    await setDoc(doc(db,'parts',partId),rest);
+    const {updateDoc,deleteField,doc,db}=window._fs;
+    await updateDoc(doc(db,'parts',partId),{img:deleteField()});
   } else {saveLocal();}
   document.getElementById('img-preview').style.display='none';
   document.getElementById('img-placeholder').style.display='block';
@@ -3761,7 +4105,8 @@ function setQuickRange(range){
 
 // Override export to use date filter
 const _origExportExcel=window.exportExcel;
-window.exportExcel=function(){
+window.exportExcel=async function(){
+  if(!await ensureTxnFrom(getFilterRange().dateFrom)) return;
   const orig=transactions;
   transactions=getFilteredTxn();
   const {dateFrom,dateTo}=getFilterRange();
@@ -3771,8 +4116,8 @@ window.exportExcel=function(){
 };
 
 const _origExportCSV=window.exportCSV;
-window.exportCSV=function(type){
-  if(type==='txn'){const orig=transactions;transactions=getFilteredTxn();_origExportCSV(type);transactions=orig;}
+window.exportCSV=async function(type){
+  if(type==='txn'){if(!await ensureTxnFrom(getFilterRange().dateFrom)) return;const orig=transactions;transactions=getFilteredTxn();_origExportCSV(type);transactions=orig;}
   else _origExportCSV(type);
 };
 

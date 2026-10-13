@@ -8,6 +8,8 @@ Spare part management PWA for MNSB. Vanilla HTML/JS, Firebase Auth + Firestore (
 - Firebase settings live only in `public/firebase-config.js`. On localhost every page uses the emulators.
 - Security is in `firestore.rules`. Any rules change needs a test in `tests/rules.test.mjs`; run `npm test`. After changing rules, the live rules must be re-published in the Firebase console.
 - Plan limits (trial: 3 users / 10 parts) live in the rules: members need a `userCount` +1 in the same batch; limited companies store parts as `slot-N`. Create parts via `window._fs.addDoc`, never raw Firestore.
-- After app changes: `node --check` each inline script, run `npm run e2e` and `npm run e2e:trial`, bump `CACHE` in `public/sw.js`.
+- Sync: parts/transactions/approvals are cached on the device and synced by `updatedAt` (see README "Scaling"). Write them only through `window._fs` (setDoc/updateDoc/addDoc/deleteDoc/writeBatch): it stamps `updatedAt`, logs deletions and updates the local cache. Rules refuse writes without them.
+- Stock changes: one `writeBatch` with the transaction + `update(part,{qty:increment(n), ...alertPatch(p,{qty}).patch})`; then `sendStockAlerts`. Never `setDoc` a whole part.
+- After app changes: `node --check` each inline script, run `npm run e2e`, `npm run e2e:trial` and `npm run e2e:scale`, bump `CACHE` in `public/sw.js`.
 - Spark plan: no backups, 50k reads / 20k writes per day. Deletes are permanent.
 - Never commit service-account keys, `users.json` (password hashes) or `backup/`.
