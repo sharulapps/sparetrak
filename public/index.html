@@ -1031,7 +1031,7 @@ async function sendPasswordReset(email){
   <div class="search-row">
     <div class="search-wrap">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input id="s-inv" placeholder="Search parts, code, category..." oninput="currentPage=1;renderParts()">
+      <input id="s-inv" placeholder="Search name or code (e.g. ehq 12), category..." oninput="currentPage=1;renderParts()">
     </div>
     <button class="filter-btn" id="f-all" onclick="setFilter('all',this)">All</button>
     <button class="filter-btn" id="f-low" onclick="setFilter('low',this)">Low Stock</button>
@@ -1162,7 +1162,7 @@ async function sendPasswordReset(email){
     <div class="search-row">
       <div class="search-wrap">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input id="stk-search" placeholder="Search parts..." oninput="renderStkList()">
+        <input id="stk-search" placeholder="Search name or code (e.g. ehq 12)..." oninput="renderStkList()">
       </div>
       <button class="filter-btn" id="stk-f-all" onclick="setStkFilter('all',this)" style="font-size:11px">All</button>
       <button class="filter-btn" id="stk-f-pending" onclick="setStkFilter('pending',this)" style="font-size:11px">Pending</button>
@@ -1501,6 +1501,39 @@ function stockLabel(p){return STOCK_STATUS[stockStatus(p)].label;}
 function reorderParts(){
   return parts.filter(p=>{const s=stockStatus(p);return s==='low'||s==='near';})
     .sort((a,b)=>(stockStatus(a)==='low'?0:1)-(stockStatus(b)==='low'?0:1));
+}
+// Search that forgives how part codes are typed: "ehq 12", "EHQ-12" or "ehq012"
+// all find MAINTEHQ00012 (spaces, dashes and leading zeros in numbers are ignored).
+// A typed number matches the whole number only: "12" finds 00012, not 00120 or 00112.
+// Best matches first: code ending with what was typed, then code / name containing it,
+// then the old plain-text match, then every word found somewhere.
+function searchKey(v){return String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'').replace(/(^|[^0-9])0+(?=[0-9])/g,'$1');}
+function keyHas(h,k){
+  if(!k) return false;
+  const dig=c=>c>='0'&&c<='9';
+  for(let i=h.indexOf(k);i>=0;i=h.indexOf(k,i+1)){
+    if(dig(k[0])&&i>0&&dig(h[i-1])) continue;
+    if(dig(k[k.length-1])&&dig(h[i+k.length]||'')) continue;
+    return true;
+  }
+  return false;
+}
+function searchParts(list,q,get){
+  q=String(q||'').trim().toLowerCase(); if(!q) return list;
+  get=get||(p=>({name:p.name,code:p.code,cat:p.cat,loc:p.loc}));
+  const qk=searchKey(q), words=q.split(/\s+/).filter(Boolean), wordKeys=words.map(searchKey);
+  const ranked=[];
+  list.forEach((p,i)=>{
+    const f=get(p), code=searchKey(f.code), name=searchKey(f.name);
+    const plain=(String(f.name)+f.code+f.cat+f.loc).toLowerCase(), all=searchKey([f.name,f.code,f.cat,f.loc].join(' '));
+    let r=-1;
+    if(keyHas(code,qk)) r=code.endsWith(qk)?0:1;
+    else if(keyHas(name,qk)) r=2;
+    else if(plain.includes(q)) r=3;
+    else if(words.every((w,j)=>keyHas(all,wordKeys[j])||(!/[0-9]/.test(w)&&plain.includes(w)))) r=4;
+    if(r>=0) ranked.push([r,i,p]);
+  });
+  return ranked.sort((a,b)=>a[0]-b[0]||a[1]-b[1]).map(x=>x[2]);
 }
 function filterParts(list){
   return filter==='all'?list:list.filter(p=>stockStatus(p)===filter);
@@ -2203,7 +2236,7 @@ function renderParts(){
   const q=(document.getElementById('s-inv').value||'').toLowerCase();
   let list=parts;
   list=filterParts(list);
-  if(q) list=list.filter(p=>(p.name+p.code+p.cat+p.loc).toLowerCase().includes(q));
+  if(q) list=searchParts(list,q);
   const el=document.getElementById('parts-list');
   if(!list.length){el.innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>No parts found</div>';return;}
 
@@ -2254,7 +2287,7 @@ function goPage(n){
   const q=(document.getElementById('s-inv').value||'').toLowerCase();
   let list=parts;
   list=filterParts(list);
-  if(q) list=list.filter(p=>(p.name+p.code+p.cat+p.loc).toLowerCase().includes(q));
+  if(q) list=searchParts(list,q);
   const totalPages = Math.ceil(list.length / PAGE_SIZE);
   currentPage = Math.max(1, Math.min(n, totalPages));
   renderParts();
@@ -3328,7 +3361,7 @@ function renderStkList(){
   let items=stkSession.items;
   if(stkFilter==='pending') items=items.filter(i=>!i.verified);
   if(stkFilter==='diff') items=items.filter(i=>i.verified&&i.variance!==0);
-  if(q) items=items.filter(i=>(i.partName+i.partCode+i.partCat+i.partLoc).toLowerCase().includes(q));
+  if(q) items=searchParts(items,q,i=>({name:i.partName,code:i.partCode,cat:i.partCat,loc:i.partLoc}));
   const el=document.getElementById('stk-parts-list');
   if(!items.length){el.innerHTML='<div class="empty" style="padding:24px 0">No parts</div>';return;}
   el.innerHTML=items.map(item=>{

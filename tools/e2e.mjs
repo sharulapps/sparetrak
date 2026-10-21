@@ -100,6 +100,18 @@ try {
   await p.click('#ntfy-edit >> text=Cancel');
   await p.evaluate(() => tab('inv', document.querySelector('.nav-btn')));
 
+  // 2c. Short code search: "e 20" finds MAINTE00020 (spaces / leading zeros ignored)
+  await p.fill('#s-inv', 'e 20');
+  await p.waitForTimeout(300);
+  const found = await partNames(p);
+  check('Search "e 20" finds MAINTE00020 first', found.length >= 1 && found[0].includes('BUSSMAN 100ET'), found.join(' | '));
+  await p.fill('#s-inv', 'w 15');
+  await p.waitForTimeout(300);
+  const found2 = await partNames(p);
+  check('Search "w 15" finds only MAINTW00015', found2.length === 1 && found2[0].includes('SEALING HEAD'), found2.join(' | '));
+  await p.fill('#s-inv', '');
+  await p.evaluate(() => renderParts());
+
   // 3. Direct read of another tenant from the browser console is refused by rules
   const hack = await p.evaluate(async () => {
     const { rootDoc, getDoc, db } = window._fs;
