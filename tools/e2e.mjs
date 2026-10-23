@@ -109,6 +109,20 @@ try {
   await p.waitForTimeout(300);
   const found2 = await partNames(p);
   check('Search "w 15" finds only MAINTW00015', found2.length === 1 && found2[0].includes('SEALING HEAD'), found2.join(' | '));
+  // Code match wins over a number inside a part name ("W68" vs "HYDRAULIC OIL AW 68")
+  await p.evaluate(async () => {
+    const { setDoc, doc, db } = window._fs;
+    await setDoc(doc(db, 'parts', 'srch-1'), { name: 'WATERJET - GLAND COLLAR 1/4"', code: 'MAINTW00068', qty: 1, min: 0, unit: 'pcs' });
+    await setDoc(doc(db, 'parts', 'srch-2'), { name: 'OIL & FLUID - HYDRAULIC OIL AW 68', code: 'MAINTM00041', qty: 1, min: 0, unit: 'pcs' });
+  });
+  await p.fill('#s-inv', 'W68');
+  await p.waitForTimeout(300);
+  const found3 = await partNames(p);
+  check('Search "W68" lists only the part code match, not "AW 68" in a name', found3.length === 1 && found3[0].includes('GLAND COLLAR'), found3.join(' | '));
+  await p.fill('#s-inv', 'oil aw 68');
+  await p.waitForTimeout(300);
+  check('No code match -> name search still works ("oil aw 68")', (await partNames(p)).some(n => n.includes('HYDRAULIC OIL AW 68')));
+  await p.evaluate(async () => { const { deleteDoc, doc, db } = window._fs; await deleteDoc(doc(db, 'parts', 'srch-1')); await deleteDoc(doc(db, 'parts', 'srch-2')); });
   await p.fill('#s-inv', '');
   await p.evaluate(() => renderParts());
 

@@ -1505,8 +1505,9 @@ function reorderParts(){
 // Search that forgives how part codes are typed: "ehq 12", "EHQ-12" or "ehq012"
 // all find MAINTEHQ00012 (spaces, dashes and leading zeros in numbers are ignored).
 // A typed number matches the whole number only: "12" finds 00012, not 00120 or 00112.
-// Best matches first: code ending with what was typed, then code / name containing it,
-// then the old plain-text match, then every word found somewhere.
+// If any part CODE matches, only code matches are listed ("W68" finds MAINTW00068,
+// not "HYDRAULIC OIL AW 68"). Otherwise: name, then the old plain-text match, then
+// every word found somewhere.
 function searchKey(v){return String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'').replace(/(^|[^0-9])0+(?=[0-9])/g,'$1');}
 function keyHas(h,k){
   if(!k) return false;
@@ -1533,7 +1534,8 @@ function searchParts(list,q,get){
     else if(words.every((w,j)=>keyHas(all,wordKeys[j])||(!/[0-9]/.test(w)&&plain.includes(w)))) r=4;
     if(r>=0) ranked.push([r,i,p]);
   });
-  return ranked.sort((a,b)=>a[0]-b[0]||a[1]-b[1]).map(x=>x[2]);
+  const codeHits=ranked.filter(x=>x[0]<=1);
+  return (codeHits.length?codeHits:ranked).sort((a,b)=>a[0]-b[0]||a[1]-b[1]).map(x=>x[2]);
 }
 function filterParts(list){
   return filter==='all'?list:list.filter(p=>stockStatus(p)===filter);
