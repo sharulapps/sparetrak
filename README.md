@@ -23,6 +23,8 @@ tools/e2e.mjs            browser walkthrough on emulators (26 checks + screensho
 tools/test-migrate.mjs   migration rehearsal old project → new project (18 checks)
 tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks)
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
+tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (13 checks)
+tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
 tools/build-index.py     one-off: generated public/index.html from sharulapps/sparetrack.
                          Edit public/index.html directly from now on.
 screenshots/             output of the walkthroughs
@@ -100,6 +102,7 @@ npm run test:migrate     # migration rehearsal
 npm run e2e              # full browser walkthrough + screenshots
 npm run e2e:trial        # free-trial sign-up and limits
 npm run e2e:scale        # cache/delta sync, stock, alerts, import
+npm run e2e:label        # scan part label (camera OCR)
 
 npm run emulators        # terminal 1
 npm run seed             # terminal 2: demo companies + users (password demo1234)
@@ -108,6 +111,19 @@ npm run serve            # http://localhost:5000  (owner console: /platform.html
 
 Demo logins after `npm run seed`: `admin@mnsb.test`, `manager@mnsb.test`, `tech@mnsb.test`,
 `admin@contoh.test`, `engineer@contoh.test`, owner `owner@sparetrack.test` — all `demo1234`.
+
+## Scan Part Label
+
+Camera button inside the inventory search box. The camera reads the code printed on a label
+("E 20", "EHQ-12", "MAINTEHQ00012") and opens that part with IN / OUT (or Request OUT) / RTN,
+the same choices as the QR scanner. It is separate from the QR scanner (own modal and camera).
+- OCR: Tesseract.js 5.1.1 + English data from jsDelivr, downloaded the first time it's used
+  (~5–10 MB, then cached by the browser). Runs on the phone; no server, no cost.
+- Only the area inside the box is read, letters/digits only, in two passes (sparse text, then
+  single block). O/I/L/S/B/Z misread inside the number are corrected.
+- One part whose code ends with the code read → opens it. Several → a list to pick from.
+  None → the text stays in a box the user can correct and search.
+- Works best on printed labels; handwriting is unreliable — QR labels remain the most reliable.
 
 ## Notes
 

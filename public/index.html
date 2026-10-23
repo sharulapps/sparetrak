@@ -4190,3 +4190,206 @@ async function doPasswordReset(){
   }
 }
 </script>
+
+<!-- ═══ SCAN LABEL (camera reads the code printed on a part label) ═══
+     Separate from the QR scanner: own button, own modal, own camera stream.
+     The OCR library (Tesseract.js) is downloaded only the first time it is used. -->
+<style>
+.search-wrap .label-scan-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:9px;border:1px solid var(--border);background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.search-wrap .label-scan-btn svg{position:static;transform:none;width:17px;height:17px;stroke:var(--text2);pointer-events:none}
+.search-wrap .label-scan-btn:hover{border-color:var(--gold,#C9A24E)}
+.search-wrap input#s-inv{padding-right:48px}
+#m-label .lbl-view{position:relative;width:100%;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3}
+#m-label video{width:100%;height:100%;object-fit:cover;display:block}
+#m-label .lbl-box{position:absolute;left:10%;width:80%;top:36%;height:28%;border:3px solid rgba(255,255,255,.85);border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none}
+#m-label .lbl-row{display:flex;gap:8px;margin-top:10px}
+#m-label .lbl-row input{flex:1;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border2,var(--border));border-radius:var(--radius);font-size:15px;font-family:inherit;text-transform:uppercase;background:var(--bg);color:var(--text)}
+#m-label .lbl-pick{display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:260px;overflow:auto}
+#m-label .lbl-item{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);cursor:pointer;text-align:left;font-family:inherit;color:var(--text)}
+#m-label .lbl-item:hover{border-color:var(--blue)}
+#m-label .lbl-found{margin-top:12px;padding:14px;background:var(--green-bg);border-radius:var(--radius);border:0.5px solid var(--green)}
+</style>
+<div class="overlay" id="m-label">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span>Scan Part Label</span>
+    <button class="close" aria-label="Close" onclick="closeLabelScan()"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div class="lbl-view"><video id="lbl-video" playsinline muted></video><div class="lbl-box"></div></div>
+  <div id="lbl-status" style="text-align:center;padding:12px 0 2px;font-size:13px;color:var(--text2)">Fit the part code inside the box, then tap Read label</div>
+  <button class="sub-btn" id="lbl-read-btn" onclick="readLabel()" style="margin-top:10px">Read label</button>
+  <div class="lbl-row">
+    <input id="lbl-text" placeholder="Code, e.g. E12" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter')findLabelPart(this.value)">
+    <button class="act" onclick="findLabelPart(document.getElementById('lbl-text').value)">Search</button>
+  </div>
+  <div id="lbl-results"></div>
+</div>
+</div>
+<script>
+const OCR_SRC='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/';
+const OCR_OPTS={workerPath:OCR_SRC+'worker.min.js',corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
+  langPath:'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int'};
+let lblStream=null, lblWorker=null, lblBusy=false;
+
+function lblEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function lblStatus(t){const e=document.getElementById('lbl-status'); if(e) e.textContent=t;}
+
+async function openLabelScan(){
+  // The QR scanner and this one never hold the camera at the same time
+  if(typeof closeScanner==='function'&&document.getElementById('m-scan').classList.contains('open')) closeScanner();
+  document.getElementById('m-label').classList.add('open');
+  document.getElementById('lbl-results').innerHTML='';
+  document.getElementById('lbl-text').value='';
+  lblStatus('Fit the part code inside the box, then tap Read label');
+  loadOcr().catch(()=>{});   // start downloading while the camera opens
+  try{
+    lblStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
+    const v=document.getElementById('lbl-video'); v.srcObject=lblStream; await v.play();
+  }catch(e){ lblStatus('Camera not available — type the code below instead.'); }
+}
+function closeLabelScan(){
+  if(lblStream) lblStream.getTracks().forEach(t=>t.stop());
+  lblStream=null;
+  const v=document.getElementById('lbl-video'); if(v) v.srcObject=null;
+  document.getElementById('m-label').classList.remove('open');
+}
+document.getElementById('m-label').addEventListener('click',e=>{if(e.target===document.getElementById('m-label'))closeLabelScan();});
+
+function loadOcr(){
+  if(lblWorker) return lblWorker;
+  lblWorker=(async()=>{
+    if(typeof Tesseract==='undefined') await new Promise((res,rej)=>{
+      const s=document.createElement('script'); s.src=OCR_SRC+'tesseract.min.js'; s.onload=res; s.onerror=()=>rej(new Error('Could not load the text reader'));
+      document.head.appendChild(s);
+    });
+    const w=await Tesseract.createWorker('eng',1,OCR_OPTS);
+    await w.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/ '});
+    return w;
+  })();
+  lblWorker.catch(()=>{lblWorker=null;});
+  return lblWorker;
+}
+
+// The part of the frame inside the box, 800px wide, high-contrast grey, white margin
+function labelCanvas(src,sw,sh){
+  const x=sw*0.10, y=sh*0.36, w=sw*0.80, h=sh*0.28;
+  const W=800, H=Math.round(h*W/w), pad=24, c=document.createElement('canvas');
+  c.width=W+pad*2; c.height=H+pad*2;
+  const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(src,x,y,w,h,pad,pad,W,H);
+  const img=g.getImageData(0,0,c.width,c.height), d=img.data;
+  let lo=255,hi=0;
+  for(let i=0;i<d.length;i+=4){const v=(d[i]*299+d[i+1]*587+d[i+2]*114)/1000; d[i]=v; if(v<lo)lo=v; if(v>hi)hi=v;}
+  const k=hi>lo?255/(hi-lo):1;
+  for(let i=0;i<d.length;i+=4){const v=(d[i]-lo)*k; d[i]=d[i+1]=d[i+2]=v;}
+  g.putImageData(img,0,0);
+  return c;
+}
+// The video is shown with object-fit:cover, so map the on-screen box back to the frame
+function videoFrameCanvas(v){
+  const vw=v.videoWidth, vh=v.videoHeight, ew=v.clientWidth||vw, eh=v.clientHeight||vh;
+  const s=Math.max(ew/vw,eh/vh), cw=ew/s, ch=eh/s, c=document.createElement('canvas');
+  c.width=Math.round(cw); c.height=Math.round(ch);
+  c.getContext('2d').drawImage(v,(vw-cw)/2,(vh-ch)/2,cw,ch,0,0,c.width,c.height);
+  return c;
+}
+
+// Codes in what was read: letters then a number, e.g. "E12", "EHQ-12", "MAINTEHQ00012".
+// In the number part, O/D/Q -> 0, I/L -> 1, S -> 5, B -> 8, Z -> 2 (usual OCR mix-ups).
+function labelCandidates(text){
+  const t=String(text||'').toUpperCase(), out=[];
+  const re=/([A-Z]{1,12})[\s\-\/.]{0,2}([0-9ODQILSBZ]*[0-9][0-9ODQILSBZ]*)/g;
+  let m;
+  while((m=re.exec(t))){
+    const num=m[2].replace(/[ODQ]/g,'0').replace(/[IL]/g,'1').replace(/S/g,'5').replace(/B/g,'8').replace(/Z/g,'2');
+    const c=m[1]+num; if(!out.includes(c)) out.push(c);
+    // "MAINTWO00015": a 0 read as the letter O at the end of the letters
+    const t0=m[1].match(/^(.*?[A-Z])([ODQ]+)$/);
+    if(t0){ const c2=t0[1]+'0'.repeat(t0[2].length)+num; if(!out.includes(c2)) out.push(c2); }
+  }
+  const whole=t.replace(/[^A-Z0-9]/g,''); if(whole&&!out.includes(whole)) out.push(whole);
+  return out;
+}
+// Parts whose code ends with the candidate (number matched whole): "E12" -> ...E00012
+function labelMatches(cand){
+  const k=searchKey(cand); if(!k) return [];
+  return parts.filter(p=>{ const c=searchKey(p.code); return c.endsWith(k)&&keyHas(c,k); });
+}
+
+async function readLabel(){
+  if(lblBusy) return;
+  const v=document.getElementById('lbl-video');
+  if(!lblStream||!v.videoWidth){ lblStatus('Camera not ready — type the code below instead.'); return; }
+  lblBusy=true; const btn=document.getElementById('lbl-read-btn'); btn.disabled=true;
+  try{
+    lblStatus(lblWorker?'Reading...':'Loading the text reader (first time only)...');
+    const w=await loadOcr();
+    lblStatus('Reading...');
+    const f=videoFrameCanvas(v), c=labelCanvas(f,f.width,f.height);
+    // Two passes: "sparse text" finds a short code anywhere on the label (E 20);
+    // "single block" reads long codes more exactly (MAINTW00015). Stop when one part matches.
+    let text='';
+    for(const psm of ['11','6']){
+      await w.setParameters({tessedit_pageseg_mode:psm});
+      text+='\n'+((await w.recognize(c)).data.text||'');
+      if(labelCandidates(text).some(k=>labelMatches(k).length===1)) break;
+    }
+    handleLabelText(text);
+  }catch(e){ lblStatus((e&&e.message)||'Could not read the label — type the code below.'); }
+  finally{ lblBusy=false; btn.disabled=false; }
+}
+// Called with the text that was read (also used by the tests)
+function handleLabelText(text){
+  const cands=labelCandidates(text);
+  for(const c of cands){
+    const m=labelMatches(c);
+    if(m.length===1){ document.getElementById('lbl-text').value=c; showLabelPart(m[0]); return; }
+  }
+  const best=cands.find(c=>labelMatches(c).length)||cands[0]||'';
+  document.getElementById('lbl-text').value=best;
+  if(!best){ lblStatus('No code found — move closer, or type the code below.'); document.getElementById('lbl-results').innerHTML=''; return; }
+  findLabelPart(best,true);
+}
+// Search typed or read text with the same search as the inventory list
+function findLabelPart(q,fromCamera){
+  q=String(q||'').trim();
+  const el=document.getElementById('lbl-results'); el.innerHTML='';
+  if(!q){ lblStatus('Type a code, e.g. E12'); return; }
+  const exact=labelMatches(q);
+  if(exact.length===1){ showLabelPart(exact[0]); return; }
+  const list=(exact.length?exact:searchParts(parts,q)).slice(0,10);
+  if(!list.length){ lblStatus((fromCamera?'Read "'+q+'" — ':'')+'no matching part. Correct the code and tap Search.'); return; }
+  lblStatus((fromCamera?'Read "'+q+'" — ':'')+list.length+' possible part'+(list.length>1?'s':'')+'. Tap the right one:');
+  el.innerHTML='<div class="lbl-pick">'+list.map(p=>`<button class="lbl-item" onclick="showLabelPart(parts.find(x=>String(x.id)==='${lblEsc(p.id)}'))"><span><b>${lblEsc(p.code||'-')}</b><br><span style="font-size:12px;color:var(--text2)">${lblEsc(p.name)}</span></span><span style="font-size:12px;color:var(--text2);white-space:nowrap">${lblEsc(p.qty)} ${lblEsc(p.unit||'')}</span></button>`).join('')+'</div>';
+}
+// Same choices as the QR scanner: IN / OUT (or Request OUT) / RTN
+function showLabelPart(p){
+  if(!p) return;
+  lblStatus('✓ Part found');
+  const id=lblEsc(p.id);
+  document.getElementById('lbl-results').innerHTML=`<div class="lbl-found" id="lbl-found" data-id="${id}">
+    <div style="font-weight:600;color:var(--green-text);margin-bottom:4px">${lblEsc(p.name)}</div>
+    <div style="font-size:12px;color:var(--green-text);margin-bottom:12px">${lblEsc(p.code||'-')} · ${lblEsc(p.loc||'-')} · Stock: ${lblEsc(p.qty)} ${lblEsc(p.unit||'')}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${can('in')?`<button class="act in" style="flex:1;justify-content:center;padding:10px" onclick="labelTxn('${id}','in')">IN</button>`:''}
+      ${can('out')?`<button class="act out" style="flex:1;justify-content:center;padding:10px" onclick="labelTxn('${id}','out')">${can('outDirect')?'OUT':'Request OUT'}</button>`:''}
+      ${can('return')?`<button class="act" style="flex:1;justify-content:center;padding:10px;background:var(--blue-bg);color:var(--blue-text);border-color:var(--blue)" onclick="labelTxn('${id}','return')">RTN</button>`:''}
+      <button class="act" style="flex:1;justify-content:center;padding:10px" onclick="labelShowInList('${id}')">Show in list</button>
+    </div></div>`;
+}
+function labelTxn(id,type){ closeLabelScan(); openTxn(id,type); }
+function labelShowInList(id){
+  const p=parts.find(x=>String(x.id)===String(id)); closeLabelScan(); if(!p) return;
+  const s=document.getElementById('s-inv'); s.value=p.code||p.name;
+  currentPage=1; renderParts();
+}
+// Camera button inside the inventory search box
+(function(){
+  const wrap=document.getElementById('s-inv')&&document.getElementById('s-inv').parentElement;
+  if(!wrap||wrap.querySelector('.label-scan-btn')) return;
+  const b=document.createElement('button');
+  b.type='button'; b.className='label-scan-btn'; b.title='Scan part label (camera reads the code)'; b.setAttribute('aria-label','Scan part label');
+  b.onclick=openLabelScan;
+  b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>';
+  wrap.appendChild(b);
+})();
+</script>

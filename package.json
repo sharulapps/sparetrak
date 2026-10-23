@@ -10,7 +10,8 @@
     "e2e": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e.mjs\"",
     "test:migrate": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/test-migrate.mjs\"",
     "e2e:trial": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-trial.mjs\"",
-    "e2e:scale": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-scale.mjs\""
+    "e2e:scale": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-scale.mjs\"",
+    "e2e:label": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-label.mjs\""
   },
   "keywords": [],
   "author": "",
@@ -23,8 +24,11 @@
   },
   "type": "module",
   "devDependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "jsqr": "^1.4.0",
     "playwright": "^1.56.1",
-    "qrcodejs": "^1.0.0"
+    "qrcodejs": "^1.0.0",
+    "tesseract.js": "^5.1.1"
   },
   "private": true
 }
