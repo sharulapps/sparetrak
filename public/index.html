@@ -4203,7 +4203,7 @@ async function doPasswordReset(){
 .search-wrap input#s-inv{padding-right:48px}
 #m-label .lbl-view{position:relative;width:100%;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3}
 #m-label video{width:100%;height:100%;object-fit:cover;display:block}
-#m-label .lbl-box{position:absolute;left:10%;width:80%;top:36%;height:28%;border:3px solid rgba(255,255,255,.85);border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none}
+#m-label .lbl-box{position:absolute;left:10%;width:80%;top:41%;height:18%;border:3px solid rgba(255,255,255,.85);border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none}
 #m-label .lbl-row{display:flex;gap:8px;margin-top:10px}
 #m-label .lbl-row input{flex:1;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border2,var(--border));border-radius:var(--radius);font-size:15px;font-family:inherit;text-transform:uppercase;background:var(--bg);color:var(--text)}
 #m-label .lbl-pick{display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:260px;overflow:auto}
@@ -4218,7 +4218,7 @@ async function doPasswordReset(){
     <button class="close" aria-label="Close" onclick="closeLabelScan()"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
   <div class="lbl-view"><video id="lbl-video" playsinline muted></video><div class="lbl-box"></div></div>
-  <div id="lbl-status" style="text-align:center;padding:12px 0 2px;font-size:13px;color:var(--text2)">Fit the part code inside the box, then tap Read label</div>
+  <div id="lbl-status" style="text-align:center;padding:12px 0 2px;font-size:13px;color:var(--text2)">Fit only the part code inside the box, hold steady, then tap Read label</div>
   <button class="sub-btn" id="lbl-read-btn" onclick="readLabel()" style="margin-top:10px">Read label</button>
   <div class="lbl-row">
     <input id="lbl-text" placeholder="Code, e.g. E12" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter')findLabelPart(this.value)">
@@ -4242,7 +4242,7 @@ async function openLabelScan(){
   document.getElementById('m-label').classList.add('open');
   document.getElementById('lbl-results').innerHTML='';
   document.getElementById('lbl-text').value='';
-  lblStatus('Fit the part code inside the box, then tap Read label');
+  lblStatus('Fit only the part code inside the box, hold steady, then tap Read label');
   loadOcr().catch(()=>{});   // start downloading while the camera opens
   try{
     lblStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
@@ -4274,7 +4274,7 @@ function loadOcr(){
 
 // The part of the frame inside the box, 800px wide, high-contrast grey, white margin
 function labelCanvas(src,sw,sh){
-  const x=sw*0.10, y=sh*0.36, w=sw*0.80, h=sh*0.28;
+  const x=sw*0.10, y=sh*0.41, w=sw*0.80, h=sh*0.18;
   const W=800, H=Math.round(h*W/w), pad=24, c=document.createElement('canvas');
   c.width=W+pad*2; c.height=H+pad*2;
   const g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(src,x,y,w,h,pad,pad,W,H);
@@ -4317,6 +4317,19 @@ function labelMatches(cand){
   return parts.filter(p=>{ const c=searchKey(p.code); return c.endsWith(k)&&keyHas(c,k); });
 }
 
+// The part a text points to, or null. A whole part code (MAINTW00068) beats a short
+// one (W68), longer beats shorter, and only codes matching exactly one part count.
+// Very short reads (under 3 letters+digits, e.g. "M1" from a location) are ignored.
+function labelPick(text){
+  let best=null;
+  for(const c of labelCandidates(text)){
+    const k=searchKey(c); if(k.length<3) continue;
+    const m=labelMatches(c); if(m.length!==1) continue;
+    const full=searchKey(m[0].code)===k, score=(full?1000:0)+k.length;
+    if(!best||score>best.score) best={part:m[0],cand:c,full,score};
+  }
+  return best;
+}
 async function readLabel(){
   if(lblBusy) return;
   const v=document.getElementById('lbl-video');
@@ -4325,31 +4338,50 @@ async function readLabel(){
   try{
     lblStatus(lblWorker?'Reading...':'Loading the text reader (first time only)...');
     const w=await loadOcr();
-    lblStatus('Reading...');
-    const f=videoFrameCanvas(v), c=labelCanvas(f,f.width,f.height);
-    // Two passes: "sparse text" finds a short code anywhere on the label (E 20);
-    // "single block" reads long codes more exactly (MAINTW00015). Stop when one part matches.
-    let text='';
-    for(const psm of ['11','6']){
-      await w.setParameters({tessedit_pageseg_mode:psm});
-      text+='\n'+((await w.recognize(c)).data.text||'');
-      if(labelCandidates(text).some(k=>labelMatches(k).length===1)) break;
+    // Up to 3 pictures. A part opens straight away only when two pictures agree,
+    // or one picture reads its whole part code. Otherwise the user picks.
+    const votes={}, picks=[]; let text='', done=null;
+    for(let i=0;i<3&&!done;i++){
+      lblStatus('Reading... ('+(i+1)+'/3) — hold steady');
+      if(i) await new Promise(r=>setTimeout(r,250));
+      const f=videoFrameCanvas(v), c=labelCanvas(f,f.width,f.height);
+      let t='', pick=null;
+      // "sparse text" finds a short code (E 20); "single block" reads long codes better
+      for(const psm of ['11','6']){
+        await w.setParameters({tessedit_pageseg_mode:psm});
+        t+='\n'+((await w.recognize(c)).data.text||'');
+        pick=labelPick(t); if(pick&&pick.full) break;
+      }
+      text+='\n'+t;
+      if(!pick) continue;
+      picks.push(pick);
+      votes[pick.part.id]=(votes[pick.part.id]||0)+1;
+      if(pick.full||votes[pick.part.id]>=2) done=pick;
+    }
+    if(done){ document.getElementById('lbl-text').value=done.cand; showLabelPart(done.part,done.cand); return; }
+    const seen=[...new Map(picks.map(x=>[x.part.id,x])).values()];
+    if(seen.length){
+      document.getElementById('lbl-text').value=seen[0].cand;
+      showLabelChoices(seen.map(x=>x.part),'Not sure — read "'+seen.map(x=>x.cand).join('" / "')+'". Check the label and tap the right part:');
+      return;
     }
     handleLabelText(text);
   }catch(e){ lblStatus((e&&e.message)||'Could not read the label — type the code below.'); }
   finally{ lblBusy=false; btn.disabled=false; }
 }
-// Called with the text that was read (also used by the tests)
+// Text from one reading (also used by the tests): opens the part only if it is certain
 function handleLabelText(text){
-  const cands=labelCandidates(text);
-  for(const c of cands){
-    const m=labelMatches(c);
-    if(m.length===1){ document.getElementById('lbl-text').value=c; showLabelPart(m[0]); return; }
-  }
-  const best=cands.find(c=>labelMatches(c).length)||cands[0]||'';
+  const pick=labelPick(text);
+  if(pick&&pick.full){ document.getElementById('lbl-text').value=pick.cand; showLabelPart(pick.part,pick.cand); return; }
+  const cands=labelCandidates(text).filter(c=>searchKey(c).length>=3);
+  const best=(pick&&pick.cand)||cands.find(c=>labelMatches(c).length)||cands[0]||'';
   document.getElementById('lbl-text').value=best;
   if(!best){ lblStatus('No code found — move closer, or type the code below.'); document.getElementById('lbl-results').innerHTML=''; return; }
   findLabelPart(best,true);
+}
+function showLabelChoices(list,msg){
+  lblStatus(msg);
+  document.getElementById('lbl-results').innerHTML='<div class="lbl-pick">'+list.map(p=>`<button class="lbl-item" onclick="showLabelPart(parts.find(x=>String(x.id)==='${lblEsc(p.id)}'))"><span><b>${lblEsc(p.code||'-')}</b><br><span style="font-size:12px;color:var(--text2)">${lblEsc(p.name)}</span></span><span style="font-size:12px;color:var(--text2);white-space:nowrap">${lblEsc(p.qty)} ${lblEsc(p.unit||'')}</span></button>`).join('')+'</div>';
 }
 // Search typed or read text with the same search as the inventory list
 function findLabelPart(q,fromCamera){
@@ -4357,16 +4389,15 @@ function findLabelPart(q,fromCamera){
   const el=document.getElementById('lbl-results'); el.innerHTML='';
   if(!q){ lblStatus('Type a code, e.g. E12'); return; }
   const exact=labelMatches(q);
-  if(exact.length===1){ showLabelPart(exact[0]); return; }
+  if(exact.length===1&&!fromCamera){ showLabelPart(exact[0]); return; }
   const list=(exact.length?exact:searchParts(parts,q)).slice(0,10);
   if(!list.length){ lblStatus((fromCamera?'Read "'+q+'" — ':'')+'no matching part. Correct the code and tap Search.'); return; }
-  lblStatus((fromCamera?'Read "'+q+'" — ':'')+list.length+' possible part'+(list.length>1?'s':'')+'. Tap the right one:');
-  el.innerHTML='<div class="lbl-pick">'+list.map(p=>`<button class="lbl-item" onclick="showLabelPart(parts.find(x=>String(x.id)==='${lblEsc(p.id)}'))"><span><b>${lblEsc(p.code||'-')}</b><br><span style="font-size:12px;color:var(--text2)">${lblEsc(p.name)}</span></span><span style="font-size:12px;color:var(--text2);white-space:nowrap">${lblEsc(p.qty)} ${lblEsc(p.unit||'')}</span></button>`).join('')+'</div>';
+  showLabelChoices(list,(fromCamera?'Read "'+q+'" — check the label. ':'')+list.length+' possible part'+(list.length>1?'s':'')+'. Tap the right one:');
 }
 // Same choices as the QR scanner: IN / OUT (or Request OUT) / RTN
-function showLabelPart(p){
+function showLabelPart(p,readAs){
   if(!p) return;
-  lblStatus('✓ Part found');
+  lblStatus(readAs?'✓ Label read as "'+readAs+'" — check it matches the label':'✓ Part found');
   const id=lblEsc(p.id);
   document.getElementById('lbl-results').innerHTML=`<div class="lbl-found" id="lbl-found" data-id="${id}">
     <div style="font-weight:600;color:var(--green-text);margin-bottom:4px">${lblEsc(p.name)}</div>

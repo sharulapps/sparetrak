@@ -53,7 +53,7 @@ async function readWithCamera(p) {
   await p.waitForFunction(() => { const v = document.getElementById('lbl-video'); return v.videoWidth > 0; }, null, { timeout: 15000 });
   await p.waitForTimeout(600);
   await p.click('#lbl-read-btn');
-  await p.waitForFunction(() => !lblBusy && /found|possible|no matching|No code|Could not/i.test(document.getElementById('lbl-status').textContent), null, { timeout: 90000 });
+  await p.waitForFunction(() => !lblBusy && /found|read as|possible|Not sure|no matching|No code|Could not/i.test(document.getElementById('lbl-status').textContent), null, { timeout: 90000 });
   return { status: (await p.textContent('#lbl-status')).trim(), text: await p.inputValue('#lbl-text') };
 }
 
@@ -64,7 +64,7 @@ try {
   await p.screenshot({ path: 'screenshots/49-label-scan-button.png', clip: { x: 0, y: 0, width: 420, height: 420 } });
   let r = await readWithCamera(p);
   const found = (await p.textContent('#lbl-results')) || '';
-  check('Label "E 20" read by the camera opens MAINTE00020', /Part found/.test(r.status) && /BUSSMAN 100ET/.test(found) && /MAINTE00020/.test(found), `read "${r.text}" · ${r.status}`);
+  check('Label "E 20" read by the camera opens MAINTE00020 (2 pictures agree)', /Label read as "E20"/.test(r.status) && /BUSSMAN 100ET/.test(found) && /MAINTE00020/.test(found), `read "${r.text}" · ${r.status}`);
   check('Technician gets Request OUT (approval flow kept)', /Request OUT/.test(found) && !/>IN</.test(found));
   await p.screenshot({ path: 'screenshots/50-label-scan-found.png' });
   await p.click('#lbl-found >> text=Request OUT');
@@ -98,6 +98,17 @@ try {
   // 4. Reading rules without the camera: OCR mix-ups in the number, several matches
   const cands = await p.evaluate(() => [labelCandidates('E 2O'), labelCandidates('MAINTW OOO15'), labelCandidates('ehq-l2')]);
   check('O/I/L mix-ups in the number are fixed', cands[0].includes('E20') && cands[1].includes('MAINTW00015') && cands[2].includes('EHQ12'), JSON.stringify(cands));
+  // One uncertain reading never opens a part by itself
+  await p.evaluate(() => { openLabelScan(); handleLabelText('W 15'); });
+  await p.waitForTimeout(300);
+  check('A single short read ("W 15") is offered to confirm, not opened', !(await p.$('#lbl-found')) && (await p.$$('#lbl-results .lbl-item')).length === 1 && /check the label/.test(await p.textContent('#lbl-status')));
+  await p.click('#lbl-results .lbl-item');
+  check('…and tapping it opens the part', /SEALING HEAD/.test(await p.textContent('#lbl-found')));
+  await p.evaluate(() => handleLabelText('MAINTW00015'));
+  check('A whole part code read once opens straight away', /SEALING HEAD/.test(await p.textContent('#lbl-found')));
+  await p.evaluate(() => handleLabelText('M1/SL'));
+  check('Location text like "M1/SL" is ignored', !(await p.$('#lbl-found')));
+  await p.evaluate(() => closeLabelScan());
   await p.evaluate(() => { openLabelScan(); handleLabelText('MAINT'); });
   await p.waitForTimeout(300);
   check('Several matches -> a list to pick from', (await p.$$('#lbl-results .lbl-item')).length >= 2 && !(await p.$('#lbl-found')));

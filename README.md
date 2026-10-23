@@ -23,7 +23,7 @@ tools/e2e.mjs            browser walkthrough on emulators (28 checks + screensho
 tools/test-migrate.mjs   migration rehearsal old project → new project (18 checks)
 tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks)
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
-tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (13 checks)
+tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (17 checks)
 tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
 tools/build-index.py     one-off: generated public/index.html from sharulapps/sparetrack.
                          Edit public/index.html directly from now on.
@@ -121,8 +121,11 @@ the same choices as the QR scanner. It is separate from the QR scanner (own moda
   (~5–10 MB, then cached by the browser). Runs on the phone; no server, no cost.
 - Only the area inside the box is read, letters/digits only, in two passes (sparse text, then
   single block). O/I/L/S/B/Z misread inside the number are corrected.
-- One part whose code ends with the code read → opens it. Several → a list to pick from.
-  None → the text stays in a box the user can correct and search.
+- Up to 3 pictures. A part opens straight away only when two pictures agree on it, or one
+  picture reads its whole part code. Otherwise the parts read are offered to pick from, with
+  what was read shown ("Label read as …"), so a misread never opens the wrong part silently.
+- Reads shorter than 3 letters+digits (e.g. "M1" from a location) are ignored. The box is one
+  line high so other text on the label stays out.
 - Works best on printed labels; handwriting is unreliable — QR labels remain the most reliable.
 
 ## Notes
