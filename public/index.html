@@ -4426,3 +4426,81 @@ function labelShowInList(id){
   wrap.appendChild(b);
 })();
 </script>
+
+<!-- ═══ HELP: video tutorials (public/tutorials/*.mp4, listed in tutorials.json) ═══
+     Recorded with tools/record-tutorials.mjs (sparetrak repo) on demo data. -->
+<style>
+#m-help{z-index:1100}
+#m-help .sheet{max-width:640px}
+#m-help .help-list{display:flex;flex-direction:column;gap:10px}
+#m-help .help-item{display:flex;gap:12px;align-items:center;width:100%;padding:10px;border:1px solid var(--border);border-radius:12px;background:var(--bg);cursor:pointer;text-align:left;font-family:inherit;color:var(--text)}
+#m-help .help-item:hover{border-color:var(--gold,#C9A24E)}
+#m-help .help-thumb{position:relative;width:64px;height:96px;flex-shrink:0;border-radius:8px;overflow:hidden;background:#0A1628}
+#m-help .help-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+#m-help .help-thumb span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;text-shadow:0 2px 6px rgba(0,0,0,.6)}
+#m-help .help-t{font-weight:700;font-size:14px}
+#m-help .help-s{font-size:12px;color:var(--text2);margin-top:2px}
+#m-help .help-m{font-size:11px;color:var(--text3);margin-top:6px}
+#m-help video{width:100%;max-height:72vh;border-radius:12px;background:#000;display:block}
+.login-help-link{background:none;border:none;color:rgba(0,212,255,.75);font-size:12px;cursor:pointer;font-family:inherit;margin-top:10px;letter-spacing:.2px}
+</style>
+<div class="overlay" id="m-help">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span id="help-title">How to use SpareTrack</span>
+    <button class="close" aria-label="Close" onclick="closeHelp()"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div id="help-body"></div>
+</div>
+</div>
+<script>
+let helpList=null;
+function helpEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function helpDur(s){s=Number(s)||0;return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+async function openHelp(){
+  document.getElementById('m-help').classList.add('open');
+  const body=document.getElementById('help-body');
+  if(!helpList){
+    body.innerHTML='<div class="empty" style="padding:24px 0">Loading tutorials...</div>';
+    try{ const r=await fetch('tutorials/tutorials.json',{cache:'no-cache'}); helpList=await r.json(); }
+    catch(e){ body.innerHTML='<div class="empty" style="padding:24px 0">Tutorials need an internet connection.</div>'; return; }
+  }
+  showHelpList();
+}
+function showHelpList(){
+  stopHelpVideo();
+  document.getElementById('help-title').textContent='How to use SpareTrack';
+  document.getElementById('help-body').innerHTML='<div style="font-size:13px;color:var(--text2);margin-bottom:12px">Short videos, about a minute each. Tap one to play.</div><div class="help-list">'+
+    helpList.map((t,i)=>`<button class="help-item" onclick="playHelp(${i})">
+      <div class="help-thumb"><img src="tutorials/${helpEsc(t.id)}.jpg" alt="" loading="lazy"><span>▶</span></div>
+      <div style="min-width:0"><div class="help-t">${i+1}. ${helpEsc(t.title)}</div><div class="help-s">${helpEsc(t.sub)}</div>
+      <div class="help-m">${helpDur(t.duration)} · ${helpEsc(t.roles)}</div></div></button>`).join('')+'</div>';
+}
+function playHelp(i){
+  const t=helpList[i]; if(!t) return;
+  document.getElementById('help-title').textContent=t.title;
+  document.getElementById('help-body').innerHTML=`<video id="help-video" controls playsinline autoplay preload="metadata" poster="tutorials/${helpEsc(t.id)}.jpg" src="tutorials/${helpEsc(t.id)}.mp4"></video>
+    <div style="font-size:13px;color:var(--text2);margin:10px 0 12px">${helpEsc(t.sub)} · <span style="color:var(--text3)">${helpEsc(t.roles)}</span></div>
+    <div style="display:flex;gap:8px">
+      <button class="act" style="flex:1;justify-content:center;padding:10px" onclick="showHelpList()">‹ All tutorials</button>
+      ${helpList[i+1]?`<button class="act" style="flex:1;justify-content:center;padding:10px" onclick="playHelp(${i+1})">Next: ${helpEsc(helpList[i+1].title)} ›</button>`:''}
+    </div>`;
+}
+function stopHelpVideo(){ const v=document.getElementById('help-video'); if(v){ v.pause(); v.removeAttribute('src'); v.load(); } }
+function closeHelp(){ stopHelpVideo(); document.getElementById('m-help').classList.remove('open'); }
+document.getElementById('m-help').addEventListener('click',e=>{if(e.target===document.getElementById('m-help'))closeHelp();});
+// "Help" at the end of the menu, and a link on the sign-in screen
+(function(){
+  const nav=document.querySelector('.nav');
+  if(nav&&!document.getElementById('nav-help')){
+    const b=document.createElement('button'); b.className='nav-btn'; b.id='nav-help'; b.onclick=openHelp;
+    b.innerHTML='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Help';
+    nav.appendChild(b);
+  }
+  const fp=document.querySelector('#login-screen button[onclick="showForgotPassword()"]');
+  if(fp&&!document.querySelector('.login-help-link')){
+    const a=document.createElement('button'); a.type='button'; a.className='login-help-link'; a.textContent='▶ How to use SpareTrack (videos)'; a.onclick=openHelp;
+    const wrap=document.createElement('div'); wrap.appendChild(a); fp.parentElement.appendChild(wrap);
+  }
+})();
+</script>

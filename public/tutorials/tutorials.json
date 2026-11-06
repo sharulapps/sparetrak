@@ -1,0 +1,86 @@
+[
+  {
+    "id": "01-getting-started",
+    "title": "Getting started",
+    "sub": "Sign in and find your way around",
+    "roles": "Everyone",
+    "duration": 40
+  },
+  {
+    "id": "02-search",
+    "title": "Search parts",
+    "sub": "Find a part fast by code, name or status",
+    "roles": "Everyone",
+    "duration": 36
+  },
+  {
+    "id": "03-stock-in-out",
+    "title": "Stock IN, OUT and Return",
+    "sub": "Record every movement so stock stays right",
+    "roles": "Admin · Manager · Engineer",
+    "duration": 51
+  },
+  {
+    "id": "04-request-approval",
+    "title": "Request OUT and approval",
+    "sub": "Technicians request · managers approve",
+    "roles": "Technician · Manager",
+    "duration": 51
+  },
+  {
+    "id": "05-scan-qr",
+    "title": "Scan a QR label",
+    "sub": "Point the camera at the part's QR code",
+    "roles": "Everyone",
+    "duration": 27
+  },
+  {
+    "id": "06-scan-label",
+    "title": "Scan a part label",
+    "sub": "The camera reads the code printed on the label",
+    "roles": "Everyone",
+    "duration": 21
+  },
+  {
+    "id": "07-add-edit-part",
+    "title": "Add and edit parts",
+    "sub": "Keep the part list clean and complete",
+    "roles": "Admin · Manager · Engineer",
+    "duration": 50
+  },
+  {
+    "id": "08-stocktake",
+    "title": "Stocktake",
+    "sub": "Count the store and fix the system stock",
+    "roles": "Admin · Manager · Engineer",
+    "duration": 31
+  },
+  {
+    "id": "09-reports",
+    "title": "Reports and Excel",
+    "sub": "Export reports and import a part list",
+    "roles": "Admin · Manager · Engineer",
+    "duration": 22
+  },
+  {
+    "id": "10-alerts",
+    "title": "Low stock alerts",
+    "sub": "See what to reorder · get alerts on your phone",
+    "roles": "Everyone",
+    "duration": 18
+  },
+  {
+    "id": "11-users",
+    "title": "Manage users",
+    "sub": "Add staff and set what they can do",
+    "roles": "Admin · Manager",
+    "duration": 29
+  },
+  {
+    "id": "12-check-duplicates",
+    "title": "Check duplicates",
+    "sub": "Find parts entered twice and junk entries",
+    "roles": "Admin · Manager · Engineer",
+    "duration": 15
+  }
+]

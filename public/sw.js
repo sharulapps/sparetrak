@@ -1,4 +1,4 @@
-const CACHE = 'sparetrak-v8';
+const CACHE = 'sparetrak-v9';
 const URLS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -17,6 +17,8 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // Tutorial videos stream with range requests: leave them to the browser
+  if (new URL(e.request.url).pathname.startsWith('/tutorials/')) return;
   e.respondWith(
     caches.match(e.request).then(cached => {
       const fetchPromise = fetch(e.request).then(res => {

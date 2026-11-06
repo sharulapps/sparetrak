@@ -128,6 +128,25 @@ the same choices as the QR scanner. It is separate from the QR scanner (own moda
   line high so other text on the label stays out.
 - Works best on printed labels; handwriting is unreliable — QR labels remain the most reliable.
 
+## Help: video tutorials
+
+**Help** (end of the menu, and "How to use SpareTrack" on the sign-in screen) lists 12 short phone-size
+videos: getting started, search, IN/OUT/RTN, request & approval, scan QR, scan label, add/edit parts,
+stocktake, reports & Excel, alerts, users, check duplicates. Files: `public/tutorials/*.mp4` (+ `.jpg`
+posters, `tutorials.json`), about 5 MB in total; the service worker leaves them alone (they stream).
+
+They are recorded automatically on the emulators with a demo company (**ABC Sdn Bhd**, `@abc.test`),
+never real data. After UI changes, re-record:
+
+```bash
+npm run tutorials                                   # this app -> public/tutorials
+TUT_APP=../sparetrack/public TUT_OUT=../sparetrack/public/tutorials npm run tutorials:v1   # old app
+TUT_ONLY=03-stock-in-out npm run tutorials          # one video
+```
+`tools/record-tutorials.mjs` holds the steps and captions of every video. The old app hard-codes its
+live Firebase config, so for it the Firebase SDK is swapped for shims that use a demo project on the
+emulators (`tools/v1-emulator/`).
+
 ## Notes
 
 - `window._fs.collection/doc` prefix `tenants/{TID}/` automatically, so app code writes

@@ -5,3 +5,4 @@ serviceAccount*.json
 *-key.json
 users*.json
 *-debug.log
+.tutorial-tmp/

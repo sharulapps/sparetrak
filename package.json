@@ -11,7 +11,9 @@
     "test:migrate": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/test-migrate.mjs\"",
     "e2e:trial": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-trial.mjs\"",
     "e2e:scale": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-scale.mjs\"",
-    "e2e:label": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-label.mjs\""
+    "e2e:label": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-label.mjs\"",
+    "tutorials": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/record-tutorials.mjs\"",
+    "tutorials:v1": "firebase emulators:exec --config tools/v1-emulator/firebase.json --only firestore,auth --project demo-v1 \"node tools/record-tutorials.mjs --flavor v1\""
   },
   "keywords": [],
   "author": "",
@@ -24,11 +26,13 @@
   },
   "type": "module",
   "devDependencies": {
+    "@emailjs/browser": "^4.4.1",
     "@tesseract.js-data/eng": "^1.0.0",
     "jsqr": "^1.4.0",
     "playwright": "^1.56.1",
     "qrcodejs": "^1.0.0",
-    "tesseract.js": "^5.1.1"
+    "tesseract.js": "^5.1.1",
+    "xlsx": "^0.18.5"
   },
   "private": true
 }
