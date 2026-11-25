@@ -490,6 +490,41 @@ const TUTORIALS = [
       await cap(p, 'Export Excel for the full report', '', 900);
       await point(p, '#m-life .act', 1200);
     } },
+  { id: '14-pm-schedule', title: 'PM schedule', sub: 'Change parts before they fail · export to VELOXA', roles: 'Everyone (export: Admin · Manager · Engineer)',
+    async setup() {
+      const txns = FLAVOR === 'v2' ? 'tenants/abc/transactions' : 'transactions';
+      const day = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+      const hist = [['demo2', 'BEARING 6205 2RS', 'Line 1', [350, 280, 212, 140, 72]],      // ~70 d life
+        ['demo8', 'V-BELT A42', 'Line 2', [215, 170, 126, 80, 35]],                          // ~45 d, due this week
+        ['demo10', 'GEAR MOTOR 0.75KW', 'Press 1', [350, 260, 170, 80]],                     // ~90 d, overdue
+        ['demo9', 'FUSE 10A', 'Panel 3', [300, 290, 150, 140, 20]]];                        // random: not scheduled
+      let i = 0;
+      for (const [id, name, m, agos] of hist) for (const a of agos)
+        await DB.doc(`${txns}/pm${i++}`).set({ partId: id, partName: name, type: 'out', qty: 1, date: day(a), machine: m, note: 'Replacement', user: 'Hafiz (Technician)', createdAt: Date.now() - a * 864e5 });
+    },
+    async run(p) {
+      await login(p, 'manager@abc.test', { show: false, intro: ['PM schedule', 'Change parts before they fail · export to VELOXA'] });
+      await cap(p, 'Tap PM in the menu', '', 600);
+      await tap(p, '#nav-pm', 1200);
+      await p.waitForSelector('#pm-list .pm-item', { timeout: 20000 });
+      await cap(p, 'Every part that is due, by week', 'Worked out from how long each part lasts on each machine', 3200);
+      await cap(p, 'PM date = before the part usually fails', 'Default 85% of its usual life — change it here', 1200);
+      await tap(p, '#pm-pct', 500); await p.keyboard.press('Escape'); await wait(p, 1400);
+      await cap(p, 'Red = overdue · "order now" = not enough stock', '', 3200);
+      await p.locator('#pm-list .pm-sec', { hasText: /Not predictable/ }).scrollIntoViewIfNeeded().catch(() => {});
+      await wait(p, 600);
+      await cap(p, 'Parts that fail at random are not scheduled', 'Keep them in stock instead', 3000);
+      await p.locator('#pm-list .pm-item').first().scrollIntoViewIfNeeded(); await wait(p, 500);
+      await cap(p, 'After the job, tap Done → record OUT', '', 600);
+      await tap(p, p.locator('#pm-list .pm-done').first(), 1000);
+      await cap(p, 'Part, machine and note are already filled in', '', 2400);
+      await tap(p, '#m-txn .sub-btn', 1600);
+      await cap(p, 'The next PM date moves forward by itself', '', 1200);
+      await tap(p, '#nav-pm', 1600);
+      await cap(p, 'Export for VELOXA → a file for the Gantt chart', '', 900);
+      await point(p, p.locator('#m-pm button', { hasText: 'Export for VELOXA' }), 600);
+      await cap(p, 'In VELOXA: open the project → Import Excel → pick the file', 'Import it again later: the same PM tasks are updated, not duplicated', 4200);
+    } },
 ];
 
 // ── Run ───────────────────────────────────────────────────

@@ -89,5 +89,12 @@
     "sub": "How long each part lasts on each machine",
     "roles": "Everyone (report: Admin · Manager · Engineer)",
     "duration": 44
+  },
+  {
+    "id": "14-pm-schedule",
+    "title": "PM schedule",
+    "sub": "Change parts before they fail · export to VELOXA",
+    "roles": "Everyone (export: Admin · Manager · Engineer)",
+    "duration": 41
   }
 ]

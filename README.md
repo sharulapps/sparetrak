@@ -24,6 +24,7 @@ tools/test-migrate.mjs   migration rehearsal old project → new project (18 che
 tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks)
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
 tools/e2e-life.mjs       Part Lifespan report (13 checks)
+tools/e2e-pm.mjs         PM Schedule + VELOXA import (11 checks)
 tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (17 checks)
 tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
 tools/build-index.py     one-off: generated public/index.html from sharulapps/sparetrack.
@@ -140,11 +141,26 @@ OUT; OUTs on the same day count once; stocktake adjustments are ignored. Needs 2
 loads the full transaction history once (it is cached after that). Export Excel included.
 Test: `npm run e2e:life`.
 
+## PM Schedule (and VELOXA Gantt)
+
+**PM** in the menu (also in Reports): preventive replacement dates from Part Lifespan.
+- PM date = last OUT on that machine + **85%** of the part's usual life there (70–100%, set per device).
+- Only part + machine pairs with **3+ OUTs** and a steady life (spread of the gaps ≤ 35% of the average)
+  are scheduled; parts that fail at random are listed as "not predictable".
+- Grouped Overdue / This week / Next 2 weeks / Within 30 days / Later (90 days). Stock check: red
+  "order now" when stock is below what is due within 30 days.
+- **Done → record OUT** opens the OUT form with the part, machine and "PM replacement" filled in; the next
+  date follows from that OUT.
+- **Export for VELOXA (Gantt)**: an .xlsx for VELOXA's *Import Excel* (project → Import Excel). Each row has a
+  `SpareTrack Ref` (part + machine + last change), so importing again updates those tasks instead of adding
+  duplicates (needs the VELOXA import change of 2026-11-25). **Export Excel**: plain schedule.
+Test: `npm run e2e:pm` (also runs VELOXA's own import code on the exported file when `../veloxa-pm` exists).
+
 ## Help: video tutorials
 
-**Help** (end of the menu, and "How to use SpareTrack" on the sign-in screen) lists 13 short phone-size
+**Help** (end of the menu, and "How to use SpareTrack" on the sign-in screen) lists 14 short phone-size
 videos: getting started, search, IN/OUT/RTN, request & approval, scan QR, scan label, add/edit parts,
-stocktake, reports & Excel, alerts, users, check duplicates, part lifespan. Files: `public/tutorials/*.mp4` (+ `.jpg`
+stocktake, reports & Excel, alerts, users, check duplicates, part lifespan, PM schedule. Files: `public/tutorials/*.mp4` (+ `.jpg`
 posters, `tutorials.json`), about 5 MB in total; the service worker leaves them alone (they stream).
 
 They are recorded automatically on the emulators with a demo company (**ABC Sdn Bhd**, `@abc.test`),

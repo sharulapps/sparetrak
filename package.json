@@ -14,7 +14,8 @@
     "e2e:label": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-label.mjs\"",
     "tutorials": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/record-tutorials.mjs\"",
     "tutorials:v1": "firebase emulators:exec --config tools/v1-emulator/firebase.json --only firestore,auth --project demo-v1 \"node tools/record-tutorials.mjs --flavor v1\"",
-    "e2e:life": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-life.mjs\""
+    "e2e:life": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-life.mjs\"",
+    "e2e:pm": "firebase emulators:exec --only firestore,auth --project demo-sparetrack \"node tools/e2e-pm.mjs\""
   },
   "keywords": [],
   "author": "",

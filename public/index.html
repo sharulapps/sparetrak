@@ -4698,3 +4698,184 @@ document.getElementById('m-life').addEventListener('click',e=>{if(e.target===doc
   if(grid&&grid.nextSibling) rpt.insertBefore(b,grid.nextSibling); else rpt.appendChild(b);
 })();
 </script>
+
+<!-- ═══ PM SCHEDULE: preventive replacement dates from Part Lifespan ═══
+     PM date = last OUT on that machine + (usual life × PM %). Only parts with a
+     steady life (3+ OUTs, small spread) are scheduled. Exports an Excel file that
+     VELOXA's "Import Excel" reads (Task / Start Date / End Date / ... / SpareTrack Ref). -->
+<style>
+#m-pm{z-index:1050}
+#m-pm .sheet{max-width:860px;max-height:92vh}
+#m-pm .pm-ctl{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+#m-pm .pm-ctl input,#m-pm .pm-ctl select{flex:1 1 140px;min-width:0;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px}
+#m-pm .pm-sec{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);margin:14px 0 6px;display:flex;justify-content:space-between}
+#m-pm .pm-sec.over{color:var(--red-text,#B91C1C)}
+#m-pm .pm-item{border:1px solid var(--border);border-radius:12px;padding:11px 13px;margin-bottom:8px;background:var(--bg)}
+#m-pm .pm-item.over{border-left:4px solid var(--red,#DC2626)}
+#m-pm .pm-item.week{border-left:4px solid var(--amber,#D97706)}
+#m-pm .pm-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+#m-pm .pm-name{font-weight:700;font-size:14px}
+#m-pm .pm-sub{font-size:12px;color:var(--text2);margin-top:2px}
+#m-pm .pm-date{text-align:right;white-space:nowrap;font-size:13px;font-weight:700}
+#m-pm .pm-date small{display:block;font-size:11px;font-weight:600;color:var(--text3)}
+#m-pm .pm-stats{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}
+#m-pm .pm-chip{font-size:11.5px;padding:3px 8px;border-radius:8px;background:var(--bg2);color:var(--text2);white-space:nowrap}
+#m-pm .pm-chip b{color:var(--text)}
+#m-pm .pm-chip.short{background:var(--red-bg,#FEE2E2);color:var(--red-text,#B91C1C)}
+#m-pm .pm-chip.short b{color:inherit}
+#m-pm .pm-done{margin-left:auto;padding:6px 12px}
+</style>
+<div class="overlay" id="m-pm">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span>PM Schedule</span>
+    <button class="close" aria-label="Close" onclick="closeM('m-pm')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Change a part <b>before</b> it usually fails: PM date = last change on that machine + the chosen % of how long it usually lasts. Only parts with 3+ changes and a steady life are scheduled.</div>
+  <div class="pm-ctl">
+    <select id="pm-pct" onchange="setPmPct(this.value)" title="When to change, as % of usual life">
+      <option value="70">PM at 70% of usual life</option><option value="75">PM at 75% of usual life</option><option value="80">PM at 80% of usual life</option>
+      <option value="85">PM at 85% of usual life</option><option value="90">PM at 90% of usual life</option><option value="100">PM at 100% (= Next change)</option>
+    </select>
+    <input id="pm-q" placeholder="Search part, code or machine" oninput="renderPm()">
+  </div>
+  <div class="pm-ctl">
+    <select id="pm-horizon" title="How far ahead to export"><option value="30">Export: next 30 days</option><option value="60">Export: next 60 days</option><option value="90" selected>Export: next 90 days</option><option value="180">Export: next 180 days</option></select>
+    <button class="act" onclick="exportPm('veloxa')" style="justify-content:center;padding:9px 12px;flex:1 1 140px">Export for VELOXA (Gantt)</button>
+    <button class="act" onclick="exportPm('excel')" style="justify-content:center;padding:9px 12px;flex:1 1 100px">Export Excel</button>
+  </div>
+  <div id="pm-summary" style="font-size:12px;color:var(--text3)"></div>
+  <div id="pm-list"></div>
+</div>
+</div>
+<script>
+const PM_CV_MAX=0.35;   // spread of the gaps (std dev / average) above this = not predictable
+const PM_HORIZON_SHOW=90;
+function pmPct(){ try{ const v=Number(localStorage.getItem('st_pm_pct')); return v>=50&&v<=100?v:85; }catch(e){ return 85; } }
+function setPmPct(v){ try{ localStorage.setItem('st_pm_pct',String(v)); }catch(e){} renderPm(); }
+// Schedule rows: part + machine with 3+ changes (pure apart from parts/transactions)
+function computePm(txns,today,pct){
+  const pmap=new Map(parts.map(p=>[String(p.id),p]));
+  return computeLifespan(txns,true,today).filter(r=>r.machine&&r.events.length>=3&&r.avg>0).map(r=>{
+    const gaps=r.events.slice(1).map(e=>e.gap);
+    const mean=gaps.reduce((a,b)=>a+b,0)/gaps.length;
+    const sd=Math.sqrt(gaps.reduce((a,b)=>a+(b-mean)*(b-mean),0)/gaps.length);
+    const cv=mean?sd/mean:9;
+    const interval=Math.max(1,Math.round(r.avg*pct/100));
+    const pmDate=r.last+interval*LIFE_DAY;
+    const p=pmap.get(r.partId);
+    return {...r,partName:p?p.name:r.partName,code:p?(p.code||''):'',unit:p?(p.unit||''):'',stock:p?Number(p.qty)||0:null,
+      cv,predictable:cv<=PM_CV_MAX,interval,pmDate,daysTo:Math.round((pmDate-today)/LIFE_DAY),need:Math.max(1,Math.round(r.qty/r.events.length)),
+      ref:'ST-PM|'+r.partId+'|'+lifeMachineKey(r.machine)+'|'+new Date(r.last).toISOString().slice(0,10)};
+  });
+}
+let pmRows=[];
+async function openPm(){
+  document.getElementById('m-pm').classList.add('open');
+  document.getElementById('pm-pct').value=String(pmPct());
+  document.getElementById('pm-list').innerHTML='<div class="empty" style="padding:24px 0">Loading...</div>';
+  if(typeof ensureTxnFrom==='function'){ try{ await ensureTxnFrom(''); }catch(e){} }
+  renderPm();
+}
+function pmBucket(d){ return d<0?'over':d<=7?'week':d<=14?'two':d<=30?'month':'later'; }
+const PM_BUCKETS=[['over','Overdue'],['week','This week'],['two','Next 2 weeks'],['month','Within 30 days'],['later','Later (up to '+PM_HORIZON_SHOW+' days)']];
+function renderPm(){
+  const pct=pmPct(), today=lifeToday();
+  const all=computePm(typeof transactions!=='undefined'?transactions:[],today,pct);
+  const q=(document.getElementById('pm-q').value||'').trim().toLowerCase();
+  let rows=all.filter(r=>r.predictable&&r.daysTo<=PM_HORIZON_SHOW);
+  if(q) rows=rows.filter(r=>(r.partName+' '+r.code+' '+r.machine).toLowerCase().includes(q)||(typeof searchKey==='function'&&searchKey(q)&&searchKey(r.code).includes(searchKey(q))));
+  rows.sort((a,b)=>a.pmDate-b.pmDate);
+  // Stock check: everything due within 30 days for the same part
+  const need30={};
+  rows.forEach(r=>{ if(r.daysTo<=30) need30[r.partId]=(need30[r.partId]||0)+r.need; });
+  rows.forEach(r=>{ r.short=r.daysTo<=30&&r.stock!=null&&r.stock<need30[r.partId]; r.need30=need30[r.partId]||r.need; });
+  pmRows=rows;
+  const notPred=all.filter(r=>!r.predictable);
+  document.getElementById('pm-summary').textContent=`${rows.length} PM job(s) in the next ${PM_HORIZON_SHOW} days · PM at ${pct}% of usual life · ${notPred.length} part/machine(s) not predictable (life varies too much)`;
+  const el=document.getElementById('pm-list');
+  if(!all.length){ el.innerHTML='<div class="empty" style="padding:24px 0">No schedule yet. A part needs 3+ OUTs on the same machine (fill in "Machine / Location used" on every OUT).</div>'; return; }
+  const canOut=typeof can==='function'&&can('out');
+  let html='';
+  for(const [b,label] of PM_BUCKETS){
+    const list=rows.filter(r=>pmBucket(r.daysTo)===b); if(!list.length) continue;
+    html+=`<div class="pm-sec ${b==='over'?'over':''}"><span>${label}</span><span>${list.length}</span></div>`;
+    html+=list.map(r=>{
+      const i=pmRows.indexOf(r);
+      return `<div class="pm-item ${b==='over'?'over':b==='week'?'week':''}">
+        <div class="pm-top"><div style="min-width:0"><div class="pm-name">${lifeEsc(r.partName)}</div>
+          <div class="pm-sub">${lifeEsc(r.code||'-')} · <b>${lifeEsc(r.machine)}</b></div></div>
+          <div class="pm-date">${lifeFmt(r.pmDate)}<small>${r.daysTo<0?(-r.daysTo)+' d late':r.daysTo===0?'today':'in '+r.daysTo+' d'}</small></div></div>
+        <div class="pm-stats">
+          <span class="pm-chip">Usually lasts <b>~${r.avg} d</b></span>
+          <span class="pm-chip">Last change <b>${lifeFmt(r.last)}</b></span>
+          <span class="pm-chip ${r.short?'short':''}">Stock <b>${r.stock==null?'-':lifeEsc(r.stock)}</b>${r.daysTo<=30?' · need '+r.need30:''}${r.short?' — order now':''}</span>
+          ${canOut?`<button class="act out pm-done" onclick="pmDone(${i})">Done → record OUT</button>`:''}
+        </div></div>`;
+    }).join('');
+  }
+  if(!rows.length) html+='<div class="empty" style="padding:18px 0">Nothing due in the next '+PM_HORIZON_SHOW+' days.</div>';
+  if(notPred.length) html+=`<div class="pm-sec"><span>Not predictable — not scheduled</span><span>${notPred.length}</span></div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:6px">Their life varies too much (e.g. fuses, sensors that fail at random). Keep them in stock instead; see Part Lifespan.</div>`+
+    notPred.slice(0,30).map(r=>`<div class="pm-item" style="opacity:.75"><div class="pm-name" style="font-size:13px">${lifeEsc(r.partName)}</div><div class="pm-sub">${lifeEsc(r.code||'-')} · ${lifeEsc(r.machine)} · lasted ${r.min}–${r.max} days</div></div>`).join('');
+  el.innerHTML=html;
+}
+// "Done": the normal OUT form, with the part and machine filled in
+function pmDone(i){
+  const r=pmRows[i]; if(!r) return;
+  closeM('m-pm');
+  openTxn(r.partId,'out');
+  setTimeout(()=>{
+    const m=document.getElementById('t-machine'); if(m) m.value=r.machine;
+    const n=document.getElementById('t-note'); if(n&&!n.value) n.value='PM replacement';
+    const q=document.getElementById('t-qty'); if(q&&!q.value) q.value=String(r.need);
+  },60);
+}
+function pmDmy(ms){ const d=new Date(ms); return String(d.getUTCDate()).padStart(2,'0')+'/'+String(d.getUTCMonth()+1).padStart(2,'0')+'/'+d.getUTCFullYear(); }
+function exportPm(kind){
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
+  const horizon=Number(document.getElementById('pm-horizon').value)||90, today=lifeToday(), pct=pmPct();
+  const rows=computePm(typeof transactions!=='undefined'?transactions:[],today,pct).filter(r=>r.predictable&&r.daysTo<=horizon).sort((a,b)=>a.pmDate-b.pmDate);
+  if(!rows.length){ toast('No PM jobs in the next '+horizon+' days'); return; }
+  const d=new Date().toISOString().slice(0,10);
+  const wb=XLSX.utils.book_new();
+  if(kind==='veloxa'){
+    // Columns VELOXA's Import Excel reads. Overdue jobs are put on today so they show on the Gantt.
+    const aoa=[['Task','Start Date','End Date','Category','Notes','Priority','Assignee','SpareTrack Ref']];
+    rows.forEach(r=>{
+      const when=r.daysTo<0?today:r.pmDate;
+      aoa.push(['PM: change '+r.partName+' — '+r.machine, pmDmy(when), pmDmy(when), 'Preventive Maintenance',
+        `${r.code?r.code+' · ':''}usually lasts ~${r.avg} days · last change ${lifeFmt(r.last)}${r.daysTo<0?' · was due '+lifeFmt(r.pmDate):''} · qty ${r.need} ${r.unit} · stock ${r.stock==null?'-':r.stock} (from SpareTrack)`,
+        r.daysTo<=7?'High':'Medium', '', r.ref]);
+    });
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=[{wch:48},{wch:12},{wch:12},{wch:22},{wch:70},{wch:9},{wch:14},{wch:40}];
+    XLSX.utils.book_append_sheet(wb,ws,'PM Schedule');
+    XLSX.writeFile(wb,'SpareTrack_PM_for_VELOXA_'+d+'.xlsx');
+    toast(rows.length+' PM job(s) exported — in VELOXA open the project and use Import Excel ✓');
+    return;
+  }
+  const aoa=[['PM date','Days','Part','Code','Machine / Location','Qty per change','Stock','Usually lasts (days)','Last change','PM at % of life']];
+  rows.forEach(r=>aoa.push([lifeFmt(r.pmDate),r.daysTo,r.partName,r.code,r.machine,r.need,r.stock??'',r.avg,lifeFmt(r.last),pct+'%']));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),'PM Schedule');
+  XLSX.writeFile(wb,'SpareTrack_PM_Schedule_'+d+'.xlsx');
+  toast('PM schedule exported ✓');
+}
+document.getElementById('m-pm').addEventListener('click',e=>{if(e.target===document.getElementById('m-pm'))closeM('m-pm');});
+// Entry points: "PM" in the menu (before Help) and a button in Reports
+(function(){
+  const nav=document.querySelector('.nav');
+  if(nav&&!document.getElementById('nav-pm')){
+    const b=document.createElement('button'); b.className='nav-btn'; b.id='nav-pm'; b.onclick=openPm;
+    b.innerHTML='<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>PM';
+    const help=document.getElementById('nav-help');
+    help?nav.insertBefore(b,help):nav.appendChild(b);
+  }
+  const rpt=document.getElementById('rpt'), life=document.getElementById('life-open');
+  if(rpt&&!document.getElementById('pm-open')){
+    const b=document.createElement('button'); b.id='pm-open'; b.className='life-open-btn'; b.onclick=openPm;
+    b.innerHTML='<span style="font-size:22px">🗓</span><span><b style="font-size:14px">PM Schedule</b><br><span style="font-size:12px;color:var(--text2)">Change parts before they fail · export to VELOXA Gantt</span></span>';
+    life&&life.nextSibling?rpt.insertBefore(b,life.nextSibling):rpt.appendChild(b);
+  }
+})();
+</script>
