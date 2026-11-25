@@ -1258,6 +1258,7 @@ async function sendPasswordReset(email){
     <div class="fg"><label>Date</label><input id="t-date" type="date"></div>
   </div>
   <div class="fg"><label>Reason / Note</label><input id="t-note" placeholder="e.g. Replacement for machine #3"></div>
+  <div class="fg" id="t-machine-wrap"><label>Machine / Location used <span style="font-weight:400;opacity:.65">(for part lifespan)</span></label><input id="t-machine" list="machine-list" placeholder="e.g. Line 3 conveyor" autocomplete="off" maxlength="80"><datalist id="machine-list"></datalist></div>
   <div class="fg"><label>Technician Name</label><input id="t-user" placeholder="Ali"></div>
   <input type="hidden" id="t-pid">
   <button class="sub-btn" onclick="saveTxn()">Submit</button>
@@ -2316,7 +2317,7 @@ function renderTxn(){
       <div class="txn-ic ${iconClass}"><svg viewBox="0 0 24 24">${arrow}</svg></div>
       <div style="flex:1;min-width:0">
         <div class="txn-name">${t.partName}${typeBadge}</div>
-        <div class="txn-meta">${t.date} · ${t.user||'-'} · ${t.note||'-'}</div>
+        <div class="txn-meta">${t.date} · ${t.user||'-'} · ${t.note||'-'}${t.machine?' · <b>'+lifeEsc(t.machine)+'</b>':''}</div>
       </div>
       <div class="txn-qty" style="${qtyColor}">${qtyLabel}</div>
     </div>`;
@@ -2472,6 +2473,7 @@ async function saveTxn(){
   if(type==='out'&&p.qty<qty){toast('Insufficient stock! (Available: '+p.qty+' '+p.unit+')');return;}
 
   const note=document.getElementById('t-note').value.trim();
+  const machine=type==='in'?'':txnMachine();
   const user=document.getElementById('t-user').value.trim()||(currentUser?currentUser.name||currentUser.email:'');
   const date=document.getElementById('t-date').value;
   const isIncrease=type==='in'||type==='return';
@@ -2494,7 +2496,7 @@ async function saveTxn(){
         partId:pid, partName:p.name, partCode:p.code||'',
         partCat:p.cat||'', partLoc:p.loc||'', unit:p.unit,
         txnType:type,
-        qty, date, note,
+        qty, date, note, machine,
         requestedBy:user, requestedByUid:currentUser?currentUser.uid:'',
         requestedByRole:currentUser?currentUser.role:'',
         status:'pending', createdAt:Date.now(), systemQty:p.qty
@@ -2520,7 +2522,7 @@ async function saveTxn(){
     // ── Direct IN / OUT / RETURN ───────────────────────────
     const newQty=p.qty+(isIncrease?qty:-qty);
     const txnData={
-      partId:pid, type, qty, date, note, user,
+      partId:pid, type, qty, date, note, user, machine,
       partName:p.name, createdAt:Date.now()
     };
     if(useCloud){
@@ -3927,7 +3929,7 @@ async function approveRequest(reqId){
   if(!isIncrease && p && p.qty<req.qty){toast('Insufficient stock to approve!');return;}
   const approvedBy=currentUser?currentUser.name||currentUser.email:'';
   const newQty=p?(isIncrease ? p.qty+req.qty : p.qty-req.qty):0;
-  const txnData={partId:req.partId,type:txnType,qty:req.qty,date:req.date,note:req.note+' [Approved by '+approvedBy+']',user:req.requestedBy,partName:req.partName,approvedBy,approvalId:reqId,createdAt:Date.now()};
+  const txnData={partId:req.partId,type:txnType,qty:req.qty,date:req.date,note:req.note+' [Approved by '+approvedBy+']',user:req.requestedBy,partName:req.partName,machine:req.machine||'',approvedBy,approvalId:reqId,createdAt:Date.now()};
 
   if(useCloud){
     // Status + movement + stock change in one atomic batch. The rules only let a
@@ -4502,5 +4504,198 @@ document.getElementById('m-help').addEventListener('click',e=>{if(e.target===doc
     const a=document.createElement('button'); a.type='button'; a.className='login-help-link'; a.textContent='▶ How to use SpareTrack (videos)'; a.onclick=openHelp;
     const wrap=document.createElement('div'); wrap.appendChild(a); fp.parentElement.appendChild(wrap);
   }
+})();
+</script>
+
+<!-- ═══ PART LIFESPAN: days between OUTs of the same part (per machine) ═══ -->
+<style>
+#m-life{z-index:1050}
+#m-life .sheet{max-width:860px;max-height:92vh}
+#m-life .life-ctl{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+#m-life .life-ctl input,#m-life .life-ctl select{flex:1 1 160px;min-width:0;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px}
+#m-life .life-card{border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;background:var(--bg);cursor:pointer}
+#m-life .life-card:hover{border-color:var(--gold,#C9A24E)}
+#m-life .life-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+#m-life .life-name{font-weight:700;font-size:14px}
+#m-life .life-sub{font-size:12px;color:var(--text2);margin-top:2px}
+#m-life .life-stats{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+#m-life .life-chip{font-size:11.5px;padding:3px 8px;border-radius:8px;background:var(--bg2);color:var(--text2);white-space:nowrap}
+#m-life .life-chip b{color:var(--text)}
+#m-life .life-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;white-space:nowrap}
+#m-life .lb-over{background:var(--red-bg,#FEE2E2);color:var(--red-text,#B91C1C)}
+#m-life .lb-soon{background:var(--amber-bg,#FEF3C7);color:var(--amber-text,#B45309)}
+#m-life .lb-early{background:#FCE7F3;color:#9D174D}
+#m-life .lb-ok{background:var(--green-bg,#DCFCE7);color:var(--green-text,#15803D)}
+#m-life .lb-low{background:var(--bg2);color:var(--text3)}
+#m-life .life-hist{margin-top:10px;border-top:1px dashed var(--border);padding-top:8px;font-size:12px;color:var(--text2)}
+#m-life .life-hist div{display:flex;justify-content:space-between;gap:8px;padding:3px 0}
+.life-open-btn{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;margin:0 0 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-family:inherit;text-align:left;color:var(--text)}
+.life-open-btn:hover{border-color:var(--gold,#C9A24E)}
+</style>
+<div class="overlay" id="m-life">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span>Part Lifespan</span>
+    <button class="close" aria-label="Close" onclick="closeM('m-life')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Days between OUTs of the same part on the same machine = how long the part lasts. Returns are subtracted; OUTs on the same day count once. Needs at least 2 OUTs.</div>
+  <div class="life-ctl">
+    <input id="life-q" placeholder="Search part, code or machine" oninput="renderLife()">
+    <select id="life-group" onchange="renderLife()"><option value="machine">Part + machine</option><option value="part">Part only (all machines)</option></select>
+    <select id="life-filter" onchange="renderLife()"><option value="data">With 2+ OUTs</option><option value="all">All parts used</option><option value="due">Overdue / due soon</option><option value="early">Failed early</option></select>
+    <button class="act" onclick="exportLife()" style="justify-content:center;padding:9px 12px">Export Excel</button>
+  </div>
+  <div id="life-summary" style="font-size:12px;color:var(--text3);margin-bottom:8px"></div>
+  <div id="life-list"></div>
+</div>
+</div>
+<script>
+// ── Machine / location on OUT and RETURN (for the lifespan report) ──
+function lifeEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function txnMachine(){ const e=document.getElementById('t-machine'); return e?e.value.trim().replace(/\s+/g,' '):''; }
+function prepMachineField(type){
+  const wrap=document.getElementById('t-machine-wrap'); if(!wrap) return;
+  type=type||document.getElementById('t-type').value;
+  wrap.style.display=type==='in'?'none':'block';
+  // Suggestions: machines already used, most used first
+  // "Line 1" and "line 1" are one machine: offer the spelling used most
+  const n={};
+  (typeof transactions!=='undefined'?transactions:[]).forEach(t=>{ const m=(t.machine||'').trim(); if(!m) return; const k=lifeMachineKey(m);
+    const e=n[k]||(n[k]={c:0,names:{}}); e.c++; e.names[m]=(e.names[m]||0)+1; });
+  const dl=document.getElementById('machine-list');
+  if(dl) dl.innerHTML=Object.values(n).sort((a,b)=>b.c-a.c).slice(0,200).map(e=>{ const m=Object.keys(e.names).sort((a,b)=>e.names[b]-e.names[a])[0]; return `<option value="${lifeEsc(m)}">`; }).join('');
+}
+(function(){
+  const _openTxn=window.openTxn;
+  window.openTxn=function(pid,type){ _openTxn(pid,type); const e=document.getElementById('t-machine'); if(e) e.value=''; prepMachineField(type); };
+  const sel=document.getElementById('t-type'); if(sel) sel.addEventListener('change',()=>prepMachineField(sel.value));
+})();
+
+// ── Lifespan maths (pure, also used by the tests) ──
+const LIFE_DAY=864e5;
+function lifeDay(t){ const d=String(t.date||'').slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(d)) return Date.parse(d+'T00:00:00Z'); return t.createdAt?Math.floor(Number(t.createdAt)/LIFE_DAY)*LIFE_DAY:NaN; }
+function lifeMachineKey(m){ return String(m||'').trim().toLowerCase().replace(/\s+/g,' '); }
+// txns: transactions; byMachine: group per part + machine (else per part); today: ms (UTC midnight)
+function computeLifespan(txns,byMachine,today){
+  const list=txns.filter(t=>(t.type==='out'||t.type==='return')&&t.partId!=null&&t.user!=='Stocktake'&&Number(t.qty)>0&&!isNaN(lifeDay(t)))
+    .map(t=>({...t,_d:lifeDay(t),_m:lifeMachineKey(t.machine),_left:Number(t.qty)}))
+    .sort((a,b)=>a._d-b._d||(a.createdAt||0)-(b.createdAt||0));
+  // A RETURN cancels the latest earlier OUT of that part (same machine when one was given)
+  const outs=[];
+  for(const t of list){
+    if(t.type==='out'){ outs.push(t); continue; }
+    let q=Number(t.qty);
+    for(let i=outs.length-1;i>=0&&q>0;i--){
+      const o=outs[i];
+      if(String(o.partId)!==String(t.partId)||o._left<=0||o._d>t._d) continue;
+      if(t._m&&o._m&&o._m!==t._m) continue;
+      const k=Math.min(q,o._left); o._left-=k; q-=k;
+    }
+  }
+  const groups=new Map();
+  for(const o of outs){
+    if(o._left<=0) continue;
+    const key=String(o.partId)+'|'+(byMachine?o._m:'');
+    let g=groups.get(key);
+    if(!g){ g={partId:String(o.partId),partName:o.partName||'',machine:byMachine?(o.machine||'').trim():'',days:new Map()}; groups.set(key,g); }
+    if(byMachine&&!g.machine&&o.machine) g.machine=o.machine.trim();
+    // OUTs on the same day are one replacement
+    const d=g.days.get(o._d)||{d:o._d,qty:0,by:new Set()};
+    d.qty+=o._left; if(o.user) d.by.add(o.user); g.days.set(o._d,d);
+  }
+  const out=[];
+  for(const g of groups.values()){
+    const ev=[...g.days.values()].sort((a,b)=>a.d-b.d);
+    const gaps=ev.slice(1).map((e,i)=>Math.round((e.d-ev[i].d)/LIFE_DAY));
+    const qty=ev.reduce((a,e)=>a+e.qty,0);
+    const r={partId:g.partId,partName:g.partName,machine:g.machine,events:ev.map((e,i)=>({date:e.d,qty:e.qty,by:[...e.by].join(', '),gap:i?gaps[i-1]:null})),
+      outs:ev.length,qty,last:ev[ev.length-1].d,avg:null,min:null,max:null,next:null,status:'low',lastGap:gaps.length?gaps[gaps.length-1]:null};
+    if(gaps.length){
+      r.avg=Math.round(gaps.reduce((a,b)=>a+b,0)/gaps.length); r.min=Math.min(...gaps); r.max=Math.max(...gaps);
+      r.next=r.last+r.avg*LIFE_DAY;
+      const left=Math.round((r.next-today)/LIFE_DAY);
+      r.daysLeft=left;
+      r.status=left<0?'over':left<=14?'soon':'ok';
+      // the latest part lasted less than half the usual time
+      if(gaps.length>=2&&r.lastGap<r.avg*0.5) r.early=true;
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+// ── Report ──
+let lifeRows=[];
+function lifeFmt(ms){ return ms==null?'-':new Date(ms).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}); }
+function lifeToday(){ const n=new Date(); return Date.UTC(n.getFullYear(),n.getMonth(),n.getDate()); }
+async function openLifespan(){
+  document.getElementById('m-life').classList.add('open');
+  document.getElementById('life-list').innerHTML='<div class="empty" style="padding:24px 0">Loading...</div>';
+  // The newer app keeps only recent transactions on the device: lifespan needs them all
+  if(typeof ensureTxnFrom==='function'){ try{ await ensureTxnFrom(''); }catch(e){} }
+  renderLife();
+}
+function renderLife(){
+  const byMachine=document.getElementById('life-group').value==='machine';
+  const f=document.getElementById('life-filter').value;
+  const q=(document.getElementById('life-q').value||'').trim().toLowerCase();
+  const pmap=new Map(parts.map(p=>[String(p.id),p]));
+  let rows=computeLifespan(typeof transactions!=='undefined'?transactions:[],byMachine,lifeToday()).map(r=>{
+    const p=pmap.get(r.partId); return {...r,partName:p?p.name:r.partName,code:p?(p.code||''):'',unit:p?(p.unit||''):'',stock:p?p.qty:null};
+  });
+  const total=rows.length, withData=rows.filter(r=>r.avg!=null).length;
+  if(f==='data') rows=rows.filter(r=>r.avg!=null);
+  if(f==='due') rows=rows.filter(r=>r.status==='over'||r.status==='soon');
+  if(f==='early') rows=rows.filter(r=>r.early);
+  if(q){ const qk=typeof searchKey==='function'?searchKey(q):q; rows=rows.filter(r=>(r.partName+' '+r.code+' '+r.machine).toLowerCase().includes(q)||(qk&&typeof searchKey==='function'&&searchKey(r.code).includes(qk))); }
+  const rank={over:0,soon:1,ok:2,low:3};
+  rows.sort((a,b)=>(rank[a.status]-rank[b.status])||((a.daysLeft??1e9)-(b.daysLeft??1e9))||a.partName.localeCompare(b.partName));
+  lifeRows=rows;
+  document.getElementById('life-summary').textContent=`${total} part${byMachine?' + machine':''} group(s) with OUTs · ${withData} with 2+ OUTs · showing ${rows.length}`;
+  const el=document.getElementById('life-list');
+  if(!rows.length){ el.innerHTML='<div class="empty" style="padding:24px 0">'+(total?'Nothing matches.':'No OUT transactions yet.')+'</div>'; return; }
+  el.innerHTML=rows.slice(0,300).map((r,i)=>{
+    const badge=r.avg==null?'<span class="life-badge lb-low">1 OUT — need more data</span>'
+      :r.status==='over'?`<span class="life-badge lb-over">Overdue ${-r.daysLeft} d</span>`
+      :r.status==='soon'?`<span class="life-badge lb-soon">Due in ${r.daysLeft} d</span>`
+      :`<span class="life-badge lb-ok">Next in ${r.daysLeft} d</span>`;
+    return `<div class="life-card" onclick="toggleLife(${i})">
+      <div class="life-top"><div style="min-width:0"><div class="life-name">${lifeEsc(r.partName)}</div>
+        <div class="life-sub">${lifeEsc(r.code||'-')}${byMachine?' · '+(r.machine?'<b>'+lifeEsc(r.machine)+'</b>':'<i>machine not recorded</i>'):''}</div></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">${badge}${r.early?'<span class="life-badge lb-early">⚠ Failed early</span>':''}</div></div>
+      <div class="life-stats">
+        <span class="life-chip">OUTs <b>${r.outs}</b> (${r.qty} ${lifeEsc(r.unit)})</span>
+        ${r.avg!=null?`<span class="life-chip">Lasts <b>~${r.avg} days</b></span><span class="life-chip">Min ${r.min} · Max ${r.max} d</span>`:''}
+        <span class="life-chip">Last OUT <b>${lifeFmt(r.last)}</b></span>
+        ${r.next!=null?`<span class="life-chip">Next ~<b>${lifeFmt(r.next)}</b></span>`:''}
+        ${r.stock!=null?`<span class="life-chip">Stock <b>${lifeEsc(r.stock)}</b></span>`:''}
+      </div>
+      <div class="life-hist" id="life-h${i}" style="display:none">${r.events.slice().reverse().map(e=>`<div><span>${lifeFmt(e.date)} · ${e.qty} ${lifeEsc(r.unit)}${e.by?' · '+lifeEsc(e.by):''}</span><span>${e.gap==null?'first':'<b>'+e.gap+' d</b> after previous'}</span></div>`).join('')}</div>
+    </div>`;
+  }).join('')+(rows.length>300?'<div class="empty" style="padding:10px 0">Showing 300 — search to narrow down.</div>':'');
+}
+function toggleLife(i){ const e=document.getElementById('life-h'+i); if(e) e.style.display=e.style.display==='none'?'block':'none'; }
+function exportLife(){
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
+  const byMachine=document.getElementById('life-group').value==='machine';
+  const head=['Part','Code',...(byMachine?['Machine / Location']:[]),'OUTs','Qty out','Avg days between OUTs','Min days','Max days','Last OUT','Next expected','Days left','Status','Failed early'];
+  const rows=lifeRows.map(r=>[r.partName,r.code,...(byMachine?[r.machine||'(not recorded)']:[]),r.outs,r.qty,r.avg??'',r.min??'',r.max??'',lifeFmt(r.last),r.next!=null?lifeFmt(r.next):'',r.daysLeft??'',
+    r.avg==null?'Need more data':r.status==='over'?'Overdue':r.status==='soon'?'Due soon':'OK',r.early?'YES':'']);
+  const hist=[['Part','Code',...(byMachine?['Machine / Location']:[]),'OUT date','Qty','Days after previous','By']];
+  lifeRows.forEach(r=>r.events.forEach(e=>hist.push([r.partName,r.code,...(byMachine?[r.machine||'(not recorded)']:[]),lifeFmt(e.date),e.qty,e.gap??'',e.by])));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([head,...rows]),'Part Lifespan');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(hist),'OUT History');
+  XLSX.writeFile(wb,'SpareTrack_Part_Lifespan_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Part lifespan exported ✓');
+}
+document.getElementById('m-life').addEventListener('click',e=>{if(e.target===document.getElementById('m-life'))closeM('m-life');});
+// Entry point in Reports
+(function(){
+  const rpt=document.getElementById('rpt'); if(!rpt||document.getElementById('life-open')) return;
+  const b=document.createElement('button'); b.id='life-open'; b.className='life-open-btn'; b.onclick=openLifespan;
+  b.innerHTML='<span style="font-size:22px">⏱</span><span><b style="font-size:14px">Part Lifespan</b><br><span style="font-size:12px;color:var(--text2)">How long each part lasts on each machine · next replacement due</span></span>';
+  const grid=document.getElementById('stat-grid');
+  if(grid&&grid.nextSibling) rpt.insertBefore(b,grid.nextSibling); else rpt.appendChild(b);
 })();
 </script>

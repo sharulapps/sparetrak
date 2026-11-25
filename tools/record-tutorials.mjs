@@ -458,13 +458,46 @@ const TUTORIALS = [
       await cap(p, 'Entries where every detail is the same are listed together', 'Review, then delete the extra one', 3200);
       await cap(p, 'Junk entries (a part code saved as the name) are listed too', 'Untick anything you want to keep', 3200);
     } },
+  { id: '13-part-lifespan', title: 'Part lifespan', sub: 'How long each part lasts on each machine', roles: 'Everyone (report: Admin · Manager · Engineer)',
+    async setup() {
+      // History: BEARING 6205 replaced on Line 1 about every 70 days, on Line 3 about every 38 (last one failed early)
+      const txns = FLAVOR === 'v2' ? 'tenants/abc/transactions' : 'transactions';
+      const day = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+      const rows = [[350, 'Line 1'], [280, 'Line 1'], [212, 'Line 1'], [140, 'Line 1'], [72, 'Line 1'],
+        [190, 'Line 3'], [146, 'Line 3'], [100, 'Line 3'], [52, 'Line 3'], [40, 'Line 3']];
+      for (const [i, [ago, m]] of rows.entries())
+        await DB.doc(`${txns}/life${i}`).set({ partId: 'demo2', partName: 'BEARING 6205 2RS', type: 'out', qty: 1, date: day(ago), machine: m,
+          note: 'Bearing worn', user: 'Hafiz (Technician)', createdAt: Date.now() - ago * 864e5 });
+    },
+    async run(p) {
+      await login(p, 'manager@abc.test', { show: false, intro: ['Part lifespan', 'How long each part lasts on each machine'] });
+      await cap(p, 'On every OUT, fill in the machine it goes into', 'Pick one from the list, or type a new one', 1200);
+      await search(p, 'ehq 12');
+      await tap(p, card(p, 'MAINTEHQ00012').locator('.act.out'), 800);
+      await typeIn(p, '#t-qty', '1');
+      await typeIn(p, '#t-note', 'Bearing noisy');
+      await typeIn(p, '#t-machine', 'Line 1', 700);
+      await tap(p, '#m-txn .sub-btn', 1600);
+      await cap(p, 'Then Reports → Part Lifespan', '', 900);
+      await goTab(p, 'Reports');
+      await tap(p, '#life-open', 1500);
+      await p.waitForSelector('#life-list .life-card', { timeout: 20000 });
+      await cap(p, 'Days between OUTs = how long the part lasts there', 'Line 1: about every 70 days · Line 3: about every 38 days', 3400);
+      await cap(p, 'Next expected replacement, and Overdue / Due soon', 'Plan PM and keep stock ready before it fails', 3200);
+      await tap(p, p.locator('#life-list .life-card').first(), 1200);
+      await cap(p, 'Tap a part to see every OUT and the gap before it', '', 3000);
+      await cap(p, '⚠ Failed early = the last one lasted under half the usual time', 'Check installation, alignment or supplier quality', 3200);
+      await cap(p, 'Export Excel for the full report', '', 900);
+      await point(p, '#m-life .act', 1200);
+    } },
 ];
 
 // ── Run ───────────────────────────────────────────────────
 await seed();
 // Refuse to start if something (e.g. an old run) still serves this port
 if (await fetch(BASE + '/index.html').then(() => true, () => false)) { console.error(`Port ${PORT} is already in use — stop the old server first.`); process.exit(1); }
-const server = spawn('npx', ['-y', 'serve', '-l', String(PORT), APP], { stdio: 'ignore' });
+// own process group, so the whole server (npx + serve) can be stopped at the end
+const server = spawn('npx', ['-y', 'serve', '-l', String(PORT), APP], { stdio: 'ignore', detached: true });
 await new Promise(r => setTimeout(r, 2500));
 
 // Camera fixtures: QR of a demo part (made in the app itself) and a printed label
@@ -520,8 +553,11 @@ for (const t of TUTORIALS) {
   index.push({ id: t.id, title: t.title, sub: t.sub, roles: t.roles, duration: Math.round(dur) });
   console.log(`  -> ${t.id}.mp4 (${Math.round(dur)}s)`);
 }
-if (!ONLY) writeFileSync(join(OUT, 'tutorials.json'), JSON.stringify(index, null, 2) + '\n');
+// tutorials.json: everything recorded now, plus earlier entries for videos not re-recorded
+const prev = existsSync(join(OUT, 'tutorials.json')) && ONLY ? JSON.parse(readFileSync(join(OUT, 'tutorials.json'), 'utf8')) : [];
+const merged = [...prev.filter(x => !index.some(y => y.id === x.id) && TUTORIALS.some(t => t.id === x.id)), ...index].sort((a, b) => a.id.localeCompare(b.id));
+writeFileSync(join(OUT, 'tutorials.json'), JSON.stringify(merged, null, 2) + '\n');
 await browser?.close();
-server.kill();
+try { process.kill(-server.pid); } catch (e) { server.kill(); }
 if (!process.env.TUT_KEEP) rmSync(TMP, { recursive: true, force: true });
 console.log('Done:', OUT);

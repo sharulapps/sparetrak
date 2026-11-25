@@ -82,5 +82,12 @@
     "sub": "Find parts entered twice and junk entries",
     "roles": "Admin · Manager · Engineer",
     "duration": 15
+  },
+  {
+    "id": "13-part-lifespan",
+    "title": "Part lifespan",
+    "sub": "How long each part lasts on each machine",
+    "roles": "Everyone (report: Admin · Manager · Engineer)",
+    "duration": 44
   }
 ]

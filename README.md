@@ -23,6 +23,7 @@ tools/e2e.mjs            browser walkthrough on emulators (28 checks + screensho
 tools/test-migrate.mjs   migration rehearsal old project → new project (18 checks)
 tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks)
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
+tools/e2e-life.mjs       Part Lifespan report (13 checks)
 tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (17 checks)
 tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
 tools/build-index.py     one-off: generated public/index.html from sharulapps/sparetrack.
@@ -128,11 +129,22 @@ the same choices as the QR scanner. It is separate from the QR scanner (own moda
   line high so other text on the label stays out.
 - Works best on printed labels; handwriting is unreliable — QR labels remain the most reliable.
 
+## Part Lifespan
+
+OUT / RETURN / Request OUT ask for the **Machine / Location used** (optional, free text with
+suggestions; "Line 1" and "line 1" count as one). Transactions store it as `machine`.
+**Reports → Part Lifespan** groups OUTs per part + machine (or per part) and shows days between
+OUTs (average / min / max), last OUT, next expected replacement, Overdue / Due soon, and
+"Failed early" (the last part lasted under half the usual time). RETURNs cancel the latest earlier
+OUT; OUTs on the same day count once; stocktake adjustments are ignored. Needs 2+ OUTs. Opening it
+loads the full transaction history once (it is cached after that). Export Excel included.
+Test: `npm run e2e:life`.
+
 ## Help: video tutorials
 
-**Help** (end of the menu, and "How to use SpareTrack" on the sign-in screen) lists 12 short phone-size
+**Help** (end of the menu, and "How to use SpareTrack" on the sign-in screen) lists 13 short phone-size
 videos: getting started, search, IN/OUT/RTN, request & approval, scan QR, scan label, add/edit parts,
-stocktake, reports & Excel, alerts, users, check duplicates. Files: `public/tutorials/*.mp4` (+ `.jpg`
+stocktake, reports & Excel, alerts, users, check duplicates, part lifespan. Files: `public/tutorials/*.mp4` (+ `.jpg`
 posters, `tutorials.json`), about 5 MB in total; the service worker leaves them alone (they stream).
 
 They are recorded automatically on the emulators with a demo company (**ABC Sdn Bhd**, `@abc.test`),
