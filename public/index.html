@@ -4538,11 +4538,11 @@ document.getElementById('m-help').addEventListener('click',e=>{if(e.target===doc
     <span>Part Lifespan</span>
     <button class="close" aria-label="Close" onclick="closeM('m-life')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
-  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Days between OUTs of the same part on the same machine = how long the part lasts. Returns are subtracted; OUTs on the same day count once. Needs at least 2 OUTs.</div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Days between OUTs of the same part on the same machine = how long the part lasts. Next change = last OUT + that many days. Returns are subtracted; OUTs on the same day count once. Needs at least 2 OUTs.</div>
   <div class="life-ctl">
     <input id="life-q" placeholder="Search part, code or machine" oninput="renderLife()">
     <select id="life-group" onchange="renderLife()"><option value="machine">Part + machine</option><option value="part">Part only (all machines)</option></select>
-    <select id="life-filter" onchange="renderLife()"><option value="data">With 2+ OUTs</option><option value="all">All parts used</option><option value="due">Overdue / due soon</option><option value="early">Failed early</option></select>
+    <select id="life-filter" onchange="renderLife()"><option value="data">With 2+ OUTs</option><option value="all">All parts used</option><option value="due">Next change overdue / in 14 days</option><option value="early">Failed early</option></select>
     <button class="act" onclick="exportLife()" style="justify-content:center;padding:9px 12px">Export Excel</button>
   </div>
   <div id="life-summary" style="font-size:12px;color:var(--text3);margin-bottom:8px"></div>
@@ -4656,9 +4656,8 @@ function renderLife(){
   if(!rows.length){ el.innerHTML='<div class="empty" style="padding:24px 0">'+(total?'Nothing matches.':'No OUT transactions yet.')+'</div>'; return; }
   el.innerHTML=rows.slice(0,300).map((r,i)=>{
     const badge=r.avg==null?'<span class="life-badge lb-low">1 OUT — need more data</span>'
-      :r.status==='over'?`<span class="life-badge lb-over">Overdue ${-r.daysLeft} d</span>`
-      :r.status==='soon'?`<span class="life-badge lb-soon">Due in ${r.daysLeft} d</span>`
-      :`<span class="life-badge lb-ok">Next in ${r.daysLeft} d</span>`;
+      :r.status==='over'?`<span class="life-badge lb-over">Next change: overdue ${-r.daysLeft} d</span>`
+      :`<span class="life-badge ${r.status==='soon'?'lb-soon':'lb-ok'}">Next change in ${r.daysLeft} d</span>`;
     return `<div class="life-card" onclick="toggleLife(${i})">
       <div class="life-top"><div style="min-width:0"><div class="life-name">${lifeEsc(r.partName)}</div>
         <div class="life-sub">${lifeEsc(r.code||'-')}${byMachine?' · '+(r.machine?'<b>'+lifeEsc(r.machine)+'</b>':'<i>machine not recorded</i>'):''}</div></div>
@@ -4667,7 +4666,7 @@ function renderLife(){
         <span class="life-chip">OUTs <b>${r.outs}</b> (${r.qty} ${lifeEsc(r.unit)})</span>
         ${r.avg!=null?`<span class="life-chip">Lasts <b>~${r.avg} days</b></span><span class="life-chip">Min ${r.min} · Max ${r.max} d</span>`:''}
         <span class="life-chip">Last OUT <b>${lifeFmt(r.last)}</b></span>
-        ${r.next!=null?`<span class="life-chip">Next ~<b>${lifeFmt(r.next)}</b></span>`:''}
+        ${r.next!=null?`<span class="life-chip">Next change ~<b>${lifeFmt(r.next)}</b></span>`:''}
         ${r.stock!=null?`<span class="life-chip">Stock <b>${lifeEsc(r.stock)}</b></span>`:''}
       </div>
       <div class="life-hist" id="life-h${i}" style="display:none">${r.events.slice().reverse().map(e=>`<div><span>${lifeFmt(e.date)} · ${e.qty} ${lifeEsc(r.unit)}${e.by?' · '+lifeEsc(e.by):''}</span><span>${e.gap==null?'first':'<b>'+e.gap+' d</b> after previous'}</span></div>`).join('')}</div>
@@ -4678,9 +4677,9 @@ function toggleLife(i){ const e=document.getElementById('life-h'+i); if(e) e.sty
 function exportLife(){
   if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
   const byMachine=document.getElementById('life-group').value==='machine';
-  const head=['Part','Code',...(byMachine?['Machine / Location']:[]),'OUTs','Qty out','Avg days between OUTs','Min days','Max days','Last OUT','Next expected','Days left','Status','Failed early'];
+  const head=['Part','Code',...(byMachine?['Machine / Location']:[]),'OUTs','Qty out','Avg days between OUTs','Min days','Max days','Last OUT','Next change','Days to next change','Status','Failed early'];
   const rows=lifeRows.map(r=>[r.partName,r.code,...(byMachine?[r.machine||'(not recorded)']:[]),r.outs,r.qty,r.avg??'',r.min??'',r.max??'',lifeFmt(r.last),r.next!=null?lifeFmt(r.next):'',r.daysLeft??'',
-    r.avg==null?'Need more data':r.status==='over'?'Overdue':r.status==='soon'?'Due soon':'OK',r.early?'YES':'']);
+    r.avg==null?'Need more data':r.status==='over'?'Next change overdue':r.status==='soon'?'Next change soon':'OK',r.early?'YES':'']);
   const hist=[['Part','Code',...(byMachine?['Machine / Location']:[]),'OUT date','Qty','Days after previous','By']];
   lifeRows.forEach(r=>r.events.forEach(e=>hist.push([r.partName,r.code,...(byMachine?[r.machine||'(not recorded)']:[]),lifeFmt(e.date),e.qty,e.gap??'',e.by])));
   const wb=XLSX.utils.book_new();
@@ -4694,7 +4693,7 @@ document.getElementById('m-life').addEventListener('click',e=>{if(e.target===doc
 (function(){
   const rpt=document.getElementById('rpt'); if(!rpt||document.getElementById('life-open')) return;
   const b=document.createElement('button'); b.id='life-open'; b.className='life-open-btn'; b.onclick=openLifespan;
-  b.innerHTML='<span style="font-size:22px">⏱</span><span><b style="font-size:14px">Part Lifespan</b><br><span style="font-size:12px;color:var(--text2)">How long each part lasts on each machine · next replacement due</span></span>';
+  b.innerHTML='<span style="font-size:22px">⏱</span><span><b style="font-size:14px">Part Lifespan</b><br><span style="font-size:12px;color:var(--text2)">How long each part lasts on each machine · when to change it next</span></span>';
   const grid=document.getElementById('stat-grid');
   if(grid&&grid.nextSibling) rpt.insertBefore(b,grid.nextSibling); else rpt.appendChild(b);
 })();

@@ -483,7 +483,7 @@ const TUTORIALS = [
       await tap(p, '#life-open', 1500);
       await p.waitForSelector('#life-list .life-card', { timeout: 20000 });
       await cap(p, 'Days between OUTs = how long the part lasts there', 'Line 1: about every 70 days · Line 3: about every 38 days', 3400);
-      await cap(p, 'Next expected replacement, and Overdue / Due soon', 'Plan PM and keep stock ready before it fails', 3200);
+      await cap(p, 'Next change = when to change the part again', 'Red = overdue · yellow = within 14 days · plan PM and keep stock ready', 3400);
       await tap(p, p.locator('#life-list .life-card').first(), 1200);
       await cap(p, 'Tap a part to see every OUT and the gap before it', '', 3000);
       await cap(p, '⚠ Failed early = the last one lasted under half the usual time', 'Check installation, alignment or supplier quality', 3200);

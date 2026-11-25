@@ -134,7 +134,7 @@ the same choices as the QR scanner. It is separate from the QR scanner (own moda
 OUT / RETURN / Request OUT ask for the **Machine / Location used** (optional, free text with
 suggestions; "Line 1" and "line 1" count as one). Transactions store it as `machine`.
 **Reports → Part Lifespan** groups OUTs per part + machine (or per part) and shows days between
-OUTs (average / min / max), last OUT, next expected replacement, Overdue / Due soon, and
+OUTs (average / min / max), last OUT and **Next change** (last OUT + average; red when overdue, yellow within 14 days), and
 "Failed early" (the last part lasted under half the usual time). RETURNs cancel the latest earlier
 OUT; OUTs on the same day count once; stocktake adjustments are ignored. Needs 2+ OUTs. Opening it
 loads the full transaction history once (it is cached after that). Export Excel included.
