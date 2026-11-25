@@ -554,7 +554,7 @@ body {
   color: rgba(255,255,255,.92);
   padding: 11px 22px; border-radius: 30px;
   font-size: 13px; font-weight: 600;
-  z-index: 300; opacity: 0;
+  z-index: 5000; /* above every modal (PM, Lifespan, Help) and the login screen */ opacity: 0;
   transition: all .3s cubic-bezier(.32,1.1,.64,1);
   white-space: nowrap; pointer-events: none;
   box-shadow: 0 8px 24px rgba(10,22,40,.25);
@@ -4862,6 +4862,8 @@ function exportPm(kind){
   toast('PM schedule exported ✓');
 }
 document.getElementById('m-pm').addEventListener('click',e=>{if(e.target===document.getElementById('m-pm'))closeM('m-pm');});
+// Messages (toast) live directly in <body>, so they show above every modal and the sign-in screen
+(function(){ const t=document.getElementById('toast'); if(t&&t.parentElement!==document.body) document.body.appendChild(t); })();
 // Entry points: "PM" in the menu (before Help) and a button in Reports
 (function(){
   const nav=document.querySelector('.nav');
