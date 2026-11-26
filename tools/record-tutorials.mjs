@@ -509,6 +509,9 @@ const TUTORIALS = [
       await tap(p, '#nav-pm', 1200);
       await p.waitForSelector('#pm-list .pm-item', { timeout: 20000 });
       await cap(p, 'Every part that is due, by week', 'Worked out from how long each part lasts on each machine', 3200);
+      await cap(p, 'Choose how far ahead: 7, 14, 30 … 180 days', 'Overdue jobs are always shown', 900);
+      await tap(p, '#pm-horizon', 500); await p.keyboard.press('Escape');
+      await p.selectOption('#pm-horizon', '90'); await wait(p, 1600);
       await cap(p, 'PM date = before the part usually fails', 'Default 85% of its usual life — change it here', 1200);
       await tap(p, '#pm-pct', 500); await p.keyboard.press('Escape'); await wait(p, 1400);
       await cap(p, 'Red = overdue · "order now" = not enough stock', '', 3200);

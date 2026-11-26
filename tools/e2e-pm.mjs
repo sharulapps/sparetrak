@@ -56,12 +56,23 @@ try {
   check('PM in the menu, before Help', await p.evaluate(() => { const b = [...document.querySelectorAll('.nav-btn')]; return b.indexOf(document.getElementById('nav-pm')) === b.indexOf(document.getElementById('nav-help')) - 1; }));
   await p.click('#nav-pm');
   await p.waitForFunction(() => document.querySelectorAll('#pm-list .pm-item').length > 0, null, { timeout: 15000 });
+  // Default view: next 7 days (+ overdue)
+  const first = await p.evaluate(() => ({ sel: document.getElementById('pm-horizon').value, codes: pmRows.map(r => r.code) }));
+  check('Opens on "next 7 days": only the job due within a week', first.sel === '7' && first.codes.join() === 'MAINTP00030', JSON.stringify(first));
+  await p.selectOption('#pm-horizon', '14');
+  check('Next 14 days: still nothing else, tells when the next PM is', await p.evaluate(() => pmRows.length) === 1);
+  await p.selectOption('#pm-horizon', '30');
+  await p.evaluate(() => { document.getElementById('pm-q').value = 'zzz'; renderPm(); });
+  check('Empty period explains how to see later jobs', /choose a longer period/.test(await p.textContent('#pm-list')) || /Nothing due/.test(await p.textContent('#pm-list')));
+  await p.evaluate(() => { document.getElementById('pm-q').value = ''; renderPm(); });
+  await p.selectOption('#pm-horizon', '90');
+  check('Choice remembered on this device', await p.evaluate(() => pmDays()) === 90);
   const rows = await p.evaluate(() => pmRows.map(r => ({ code: r.code, m: r.machine, d: r.daysTo, avg: r.avg, short: r.short })));
   const f = rows.find(r => r.code === 'MAINTE00311'), fit = rows.find(r => r.code === 'MAINTP00030');
   check('Steady part scheduled at 85% of its life (fuse: ~60 d life, last 4 d ago -> in 47 d)', f && f.avg === 60 && f.d === 47, JSON.stringify(f));
   check('Fitting due within the week, stock 0 -> "order now"', fit && fit.d <= 7 && fit.short === true, JSON.stringify(fit));
   check('Random-life part not scheduled', !rows.some(r => r.code === 'MAINTE00020') && /not predictable/i.test(await p.textContent('#pm-list')));
-  check('Sections by week', /This week/.test(await p.textContent('#pm-list')) && /Within 30 days|Later/.test(await p.textContent('#pm-list')));
+  check('Sections: next 7 days ... after 30 days', /Next 7 days/.test(await p.textContent('#pm-list')) && /After 30 days/.test(await p.textContent('#pm-list')));
   await p.screenshot({ path: 'screenshots/70-pm-schedule.png' });
   await p.selectOption('#pm-pct', '100');
   check('PM % is adjustable (100% = Next change: in 56 d)', await p.evaluate(() => pmRows.find(r => r.code === 'MAINTE00311').daysTo) === 56);

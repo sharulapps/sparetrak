@@ -24,7 +24,7 @@ tools/test-migrate.mjs   migration rehearsal old project → new project (18 che
 tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks)
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
 tools/e2e-life.mjs       Part Lifespan + Budget (20 checks)
-tools/e2e-pm.mjs         PM Schedule + VELOXA import (11 checks)
+tools/e2e-pm.mjs         PM Schedule + VELOXA import (15 checks)
 tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (17 checks)
 tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
 tools/build-index.py     one-off: generated public/index.html from sharulapps/sparetrack.
@@ -156,7 +156,7 @@ Test: `npm run e2e:life`.
 - PM date = last OUT on that machine + **85%** of the part's usual life there (70–100%, set per device).
 - Only part + machine pairs with **3+ OUTs** and a steady life (spread of the gaps ≤ 35% of the average)
   are scheduled; parts that fail at random are listed as "not predictable".
-- Grouped Overdue / This week / Next 2 weeks / Within 30 days / Later (90 days). Stock check: red
+- **Show: next 7 / 14 / 30 / 60 / 90 / 180 days** (default 7, remembered per device; overdue always shown; the exports use the same period). Grouped Overdue / Next 7 days / 8–14 days / 15–30 days / After 30 days. Stock check: red
   "order now" when stock is below what is due within 30 days.
 - **Done → record OUT** opens the OUT form with the part, machine and "PM replacement" filled in; the next
   date follows from that OUT.

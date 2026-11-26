@@ -4744,7 +4744,7 @@ document.getElementById('m-life').addEventListener('click',e=>{if(e.target===doc
     <input id="pm-q" placeholder="Search part, code or machine" oninput="renderPm()">
   </div>
   <div class="pm-ctl">
-    <select id="pm-horizon" title="How far ahead to export"><option value="30">Export: next 30 days</option><option value="60">Export: next 60 days</option><option value="90" selected>Export: next 90 days</option><option value="180">Export: next 180 days</option></select>
+    <select id="pm-horizon" title="How far ahead to show and export (overdue jobs are always shown)" onchange="setPmDays(this.value)"><option value="7">Show: next 7 days</option><option value="14">Show: next 14 days</option><option value="30">Show: next 30 days</option><option value="60">Show: next 60 days</option><option value="90">Show: next 90 days</option><option value="180">Show: next 180 days</option></select>
     <button class="act" onclick="exportPm('veloxa')" style="justify-content:center;padding:9px 12px;flex:1 1 140px">Export for VELOXA (Gantt)</button>
     <button class="act" onclick="exportPm('excel')" style="justify-content:center;padding:9px 12px;flex:1 1 100px">Export Excel</button>
   </div>
@@ -4754,7 +4754,9 @@ document.getElementById('m-life').addEventListener('click',e=>{if(e.target===doc
 </div>
 <script>
 const PM_CV_MAX=0.35;   // spread of the gaps (std dev / average) above this = not predictable
-const PM_HORIZON_SHOW=90;
+// How far ahead the list and the exports go (overdue jobs are always included)
+function pmDays(){ try{ const v=Number(localStorage.getItem('st_pm_days')); return [7,14,30,60,90,180].includes(v)?v:7; }catch(e){ return 7; } }
+function setPmDays(v){ try{ localStorage.setItem('st_pm_days',String(v)); }catch(e){} renderPm(); }
 function pmPct(){ try{ const v=Number(localStorage.getItem('st_pm_pct')); return v>=50&&v<=100?v:85; }catch(e){ return 85; } }
 function setPmPct(v){ try{ localStorage.setItem('st_pm_pct',String(v)); }catch(e){} renderPm(); }
 // Schedule rows: part + machine with 3+ changes (pure apart from parts/transactions)
@@ -4777,17 +4779,18 @@ let pmRows=[];
 async function openPm(){
   document.getElementById('m-pm').classList.add('open');
   document.getElementById('pm-pct').value=String(pmPct());
+  document.getElementById('pm-horizon').value=String(pmDays());
   document.getElementById('pm-list').innerHTML='<div class="empty" style="padding:24px 0">Loading...</div>';
   if(typeof ensureTxnFrom==='function'){ try{ await ensureTxnFrom(''); }catch(e){} }
   renderPm();
 }
 function pmBucket(d){ return d<0?'over':d<=7?'week':d<=14?'two':d<=30?'month':'later'; }
-const PM_BUCKETS=[['over','Overdue'],['week','This week'],['two','Next 2 weeks'],['month','Within 30 days'],['later','Later (up to '+PM_HORIZON_SHOW+' days)']];
+const PM_BUCKETS=[['over','Overdue'],['week','Next 7 days'],['two','8 – 14 days'],['month','15 – 30 days'],['later','After 30 days']];
 function renderPm(){
-  const pct=pmPct(), today=lifeToday();
+  const pct=pmPct(), today=lifeToday(), days=pmDays();
   const all=computePm(typeof transactions!=='undefined'?transactions:[],today,pct);
   const q=(document.getElementById('pm-q').value||'').trim().toLowerCase();
-  let rows=all.filter(r=>r.predictable&&r.daysTo<=PM_HORIZON_SHOW);
+  let rows=all.filter(r=>r.predictable&&r.daysTo<=days);
   if(q) rows=rows.filter(r=>(r.partName+' '+r.code+' '+r.machine).toLowerCase().includes(q)||(typeof searchKey==='function'&&searchKey(q)&&searchKey(r.code).includes(searchKey(q))));
   rows.sort((a,b)=>a.pmDate-b.pmDate);
   // Stock check: everything due within 30 days for the same part
@@ -4796,7 +4799,7 @@ function renderPm(){
   rows.forEach(r=>{ r.short=r.daysTo<=30&&r.stock!=null&&r.stock<need30[r.partId]; r.need30=need30[r.partId]||r.need; });
   pmRows=rows;
   const notPred=all.filter(r=>!r.predictable);
-  document.getElementById('pm-summary').textContent=`${rows.length} PM job(s) in the next ${PM_HORIZON_SHOW} days · PM at ${pct}% of usual life · ${notPred.length} part/machine(s) not predictable (life varies too much)`;
+  document.getElementById('pm-summary').textContent=`${rows.length} PM job(s): overdue + next ${days} days · PM at ${pct}% of usual life · ${notPred.length} part/machine(s) not predictable (life varies too much)`;
   const el=document.getElementById('pm-list');
   if(!all.length){ el.innerHTML='<div class="empty" style="padding:24px 0">No schedule yet. A part needs 3+ OUTs on the same machine (fill in "Machine / Location used" on every OUT).</div>'; return; }
   const canOut=typeof can==='function'&&can('out');
@@ -4818,7 +4821,8 @@ function renderPm(){
         </div></div>`;
     }).join('');
   }
-  if(!rows.length) html+='<div class="empty" style="padding:18px 0">Nothing due in the next '+PM_HORIZON_SHOW+' days.</div>';
+  if(!rows.length){ const later=all.filter(r=>r.predictable&&r.daysTo>days).sort((a,b)=>a.daysTo-b.daysTo)[0];
+    html+='<div class="empty" style="padding:18px 0">Nothing due in the next '+days+' days.'+(later?' Next PM: '+lifeEsc(later.partName)+' on '+lifeFmt(later.pmDate)+' (in '+later.daysTo+' d) — choose a longer period to see it.':'')+'</div>'; }
   if(notPred.length) html+=`<div class="pm-sec"><span>Not predictable — not scheduled</span><span>${notPred.length}</span></div>
     <div style="font-size:12px;color:var(--text2);margin-bottom:6px">Their life varies too much (e.g. fuses, sensors that fail at random). Keep them in stock instead; see Part Lifespan.</div>`+
     notPred.slice(0,30).map(r=>`<div class="pm-item" style="opacity:.75"><div class="pm-name" style="font-size:13px">${lifeEsc(r.partName)}</div><div class="pm-sub">${lifeEsc(r.code||'-')} · ${lifeEsc(r.machine)} · lasted ${r.min}–${r.max} days</div></div>`).join('');
@@ -4838,9 +4842,9 @@ function pmDone(i){
 function pmDmy(ms){ const d=new Date(ms); return String(d.getUTCDate()).padStart(2,'0')+'/'+String(d.getUTCMonth()+1).padStart(2,'0')+'/'+d.getUTCFullYear(); }
 function exportPm(kind){
   if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
-  const horizon=Number(document.getElementById('pm-horizon').value)||90, today=lifeToday(), pct=pmPct();
+  const horizon=pmDays(), today=lifeToday(), pct=pmPct();
   const rows=computePm(typeof transactions!=='undefined'?transactions:[],today,pct).filter(r=>r.predictable&&r.daysTo<=horizon).sort((a,b)=>a.pmDate-b.pmDate);
-  if(!rows.length){ toast('No PM jobs in the next '+horizon+' days'); return; }
+  if(!rows.length){ toast('No PM jobs in the next '+horizon+' days — choose a longer period'); return; }
   const d=new Date().toISOString().slice(0,10);
   const wb=XLSX.utils.book_new();
   if(kind==='veloxa'){
