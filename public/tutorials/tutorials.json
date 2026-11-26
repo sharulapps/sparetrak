@@ -96,5 +96,12 @@
     "sub": "Change parts before they fail · export to VELOXA",
     "roles": "Everyone (export: Admin · Manager · Engineer)",
     "duration": 41
+  },
+  {
+    "id": "15-budget",
+    "title": "Spare part budget",
+    "sub": "Yearly use × unit cost · what to buy",
+    "roles": "Admin · Manager · Engineer",
+    "duration": 32
   }
 ]

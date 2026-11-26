@@ -19,6 +19,7 @@ admin.initializeApp({ projectId: 'demo-sparetrack' });
 const db = admin.firestore();
 const parts = await db.collection('tenants/mnsb/parts').get();
 const bearing = parts.docs.find(d => d.data().code === 'MAINTE00311');
+await bearing.ref.update({ cost: 12.5 });
 const day = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
 const old = [[300, 'Line 1'], [230, 'Line 1'], [160, 'Line 1'], [280, 'Line 3'], [200, 'Line 3']];
 for (const [i, [ago, m]] of old.entries())
@@ -114,6 +115,20 @@ try {
   const dl = p.waitForEvent('download');
   await p.click('#m-life >> text=Export Excel');
   check('Export Excel downloads the report', /Part_Lifespan/.test((await dl).suggestedFilename()));
+  // Budget: yearly use x unit cost
+  await p.evaluate(() => closeM('m-life'));
+  await p.click('#bud-open');
+  await p.waitForSelector('#bud-body .bud-tile', { timeout: 15000 });
+  const b = await p.evaluate(() => budRows.find(r => r.code === 'MAINTE00311'));
+  check('Budget: 9.7/year + 10% -> plan 11 x RM 12.50 = RM 137.50', b && b.qty === 11 && b.yearCost === 137.5 && b.method === 'Rate from history', JSON.stringify(b && { qty: b.qty, cost: b.yearCost, m: b.method }));
+  check('Budget: to buy = plan - stock on hand', b && b.buy === Math.max(0, 11 - b.stock) && b.buyCost === b.buy * 12.5, b && `stock ${b.stock}, buy ${b.buy}`);
+  await p.selectOption('#bud-extra', '0');
+  check('Contingency changes the plan (0% -> 10 pcs)', await p.evaluate(() => budRows.find(r => r.code === 'MAINTE00311').qty) === 10);
+  check('Yearly budget tile shows the total', /Yearly budget[\s\S]*RM 125\.00/.test(await p.textContent('#bud-body')), (await p.textContent('#bud-body .bud-tile')).trim());
+  await p.screenshot({ path: 'screenshots/61-budget.png' });
+  const dl2 = p.waitForEvent('download');
+  await p.click('#m-bud >> text=Export Excel');
+  check('Budget Excel downloads', /SpareTrack_Budget_/.test((await dl2).suggestedFilename()));
 } catch (e) {
   console.error('E2E error:', e);
   results.push(false);

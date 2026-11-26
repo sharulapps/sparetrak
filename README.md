@@ -23,7 +23,7 @@ tools/e2e.mjs            browser walkthrough on emulators (28 checks + screensho
 tools/test-migrate.mjs   migration rehearsal old project → new project (18 checks)
 tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks)
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
-tools/e2e-life.mjs       Part Lifespan report (15 checks)
+tools/e2e-life.mjs       Part Lifespan + Budget (20 checks)
 tools/e2e-pm.mjs         PM Schedule + VELOXA import (11 checks)
 tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (17 checks)
 tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
@@ -141,6 +141,15 @@ OUT; OUTs on the same day count once; stocktake adjustments are ignored. Needs 2
 loads the full transaction history once (it is cached after that). Export Excel included.
 Test: `npm run e2e:life`.
 
+## Spare Part Budget
+
+**Reports → Spare Part Budget**: the next 12 months, per part = estimated use per year × Unit Cost.
+- Use per year: rate from the OUT history (first to last OUT, returns subtracted) for parts used over
+  3+ months; otherwise the quantity used in the last 12 months. Parts not used for a year are left out.
+- Contingency 0–20% (default +10%) rounds the plan quantity up. **To buy** = plan − stock on hand.
+- Tiles: yearly budget, per month, to buy, parts. Breakdown by category / supplier / location.
+  Parts without a Unit Cost are flagged (counted as RM 0). Export Excel with a total row.
+
 ## PM Schedule (and VELOXA Gantt)
 
 **PM** in the menu (also in Reports): preventive replacement dates from Part Lifespan.
@@ -158,9 +167,9 @@ Test: `npm run e2e:pm` (also runs VELOXA's own import code on the exported file 
 
 ## Help: video tutorials
 
-**Help** (end of the menu, and "How to use SpareTrack" on the sign-in screen) lists 14 short phone-size
+**Help** (end of the menu, and "How to use SpareTrack" on the sign-in screen) lists 15 short phone-size
 videos: getting started, search, IN/OUT/RTN, request & approval, scan QR, scan label, add/edit parts,
-stocktake, reports & Excel, alerts, users, check duplicates, part lifespan, PM schedule. Files: `public/tutorials/*.mp4` (+ `.jpg`
+stocktake, reports & Excel, alerts, users, check duplicates, part lifespan, PM schedule, budget. Files: `public/tutorials/*.mp4` (+ `.jpg`
 posters, `tutorials.json`), about 5 MB in total; the service worker leaves them alone (they stream).
 
 They are recorded automatically on the emulators with a demo company (**ABC Sdn Bhd**, `@abc.test`),

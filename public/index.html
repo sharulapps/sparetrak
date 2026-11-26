@@ -1234,7 +1234,7 @@ async function sendPasswordReset(email){
   <div class="fr">
     <div class="fg"><label>Supplier</label><input id="f-supplier" placeholder="Supplier name"></div>
     <div class="fg"><label>Lead Time</label><input id="f-leadtime" placeholder="e.g. 2 weeks"></div>
-    <div class="fg"><label>Unit Cost (RM) <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">— for Excel report only</span></label><input id="f-cost" type="number" step="0.01" min="0" placeholder="0.00"></div>
+    <div class="fg"><label>Unit Cost (RM) <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">— for Excel reports and the budget</span></label><input id="f-cost" type="number" step="0.01" min="0" placeholder="0.00"></div>
   </div>
   <input type="hidden" id="f-eid">
   <button class="sub-btn" onclick="savePart()">Save Changes</button>
@@ -4883,5 +4883,125 @@ document.getElementById('m-pm').addEventListener('click',e=>{if(e.target===docum
     b.innerHTML='<span style="font-size:22px">🗓</span><span><b style="font-size:14px">PM Schedule</b><br><span style="font-size:12px;color:var(--text2)">Change parts before they fail · export to VELOXA Gantt</span></span>';
     life&&life.nextSibling?rpt.insertBefore(b,life.nextSibling):rpt.appendChild(b);
   }
+})();
+</script>
+
+<!-- ═══ SPARE PART BUDGET: yearly need × unit cost, from the OUT history ═══ -->
+<style>
+#m-bud{z-index:1050}
+#m-bud .sheet{max-width:860px;max-height:92vh}
+#m-bud .bud-ctl{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+#m-bud .bud-ctl input,#m-bud .bud-ctl select{flex:1 1 150px;min-width:0;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px}
+#m-bud .bud-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px}
+#m-bud .bud-tile{border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--bg)}
+#m-bud .bud-tile small{display:block;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text3)}
+#m-bud .bud-tile b{display:block;font-size:20px;margin-top:4px;color:var(--navy,#0A1628)}
+#m-bud .bud-tile span{font-size:11.5px;color:var(--text2)}
+#m-bud .bud-sec{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);margin:14px 0 6px}
+#m-bud .bud-bar{height:8px;border-radius:6px;background:var(--bg2);overflow:hidden;margin-top:4px}
+#m-bud .bud-bar i{display:block;height:100%;background:linear-gradient(90deg,#1B3A6B,#C9A24E)}
+#m-bud .bud-row{display:flex;justify-content:space-between;gap:10px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:13px;align-items:flex-start}
+#m-bud .bud-row .n{min-width:0}
+#m-bud .bud-row .n small{display:block;font-size:11.5px;color:var(--text2);margin-top:2px}
+#m-bud .bud-row .v{text-align:right;white-space:nowrap;font-weight:700}
+#m-bud .bud-row .v small{display:block;font-size:11px;font-weight:500;color:var(--text3)}
+#m-bud .bud-warn{font-size:12px;padding:9px 11px;border-radius:10px;background:var(--amber-bg,#FEF3C7);color:var(--amber-text,#92400E);margin-bottom:10px}
+</style>
+<div class="overlay" id="m-bud">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span>Spare Part Budget</span>
+    <button class="close" aria-label="Close" onclick="closeM('m-bud')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Next 12 months, from how many of each part you actually use (OUT history, returns subtracted) × its Unit Cost. Parts used for 3+ months: rate from first to last OUT; newer ones: what was used in the last 12 months.</div>
+  <div class="bud-ctl">
+    <select id="bud-extra" onchange="renderBudget()"><option value="0">No contingency</option><option value="5">+5% contingency</option><option value="10" selected>+10% contingency</option><option value="15">+15% contingency</option><option value="20">+20% contingency</option></select>
+    <select id="bud-group" onchange="renderBudget()"><option value="cat">By category</option><option value="supplier">By supplier</option><option value="loc">By location</option></select>
+    <input id="bud-q" placeholder="Search part, code, category" oninput="renderBudget()">
+    <button class="act" onclick="exportBudget()" style="justify-content:center;padding:9px 12px">Export Excel</button>
+  </div>
+  <div id="bud-body"></div>
+</div>
+</div>
+<script>
+function budRM(v){ return 'RM '+(Number(v)||0).toLocaleString('en-MY',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+// One row per part: estimated yearly use, cost, and what still has to be bought after current stock
+function computeBudget(txns,today,extraPct){
+  const pmap=new Map(parts.map(p=>[String(p.id),p]));
+  const yearAgo=today-365*LIFE_DAY;
+  const rows=[];
+  for(const r of computeLifespan(txns,false,today)){
+    const p=pmap.get(r.partId); if(!p) continue;              // deleted parts are not budgeted
+    const span=(r.last-r.events[0].date)/LIFE_DAY;
+    const last12=r.events.filter(e=>e.date>=yearAgo).reduce((a,e)=>a+e.qty,0);
+    let perYear, method;
+    if(r.perYear!=null&&span>=90){ perYear=r.perYear; method='Rate from history'; }
+    else if(last12>0){ perYear=last12; method='Last 12 months'; }
+    else continue;                                             // not used in the last year
+    const qty=Math.ceil(perYear*(1+extraPct/100));
+    const cost=Number(p.cost)||0, stock=Math.max(0,Number(p.qty)||0);
+    const buy=Math.max(0,qty-stock);
+    rows.push({partId:r.partId,name:p.name,code:p.code||'',cat:p.cat||'',supplier:p.supplier||'',loc:p.loc||'',unit:p.unit||'',
+      perYear,method,qty,cost,stock,buy,yearCost:qty*cost,buyCost:buy*cost,noCost:!cost});
+  }
+  return rows.sort((a,b)=>b.yearCost-a.yearCost||b.qty-a.qty);
+}
+let budRows=[];
+async function openBudget(){
+  document.getElementById('m-bud').classList.add('open');
+  document.getElementById('bud-body').innerHTML='<div class="empty" style="padding:24px 0">Loading...</div>';
+  if(typeof ensureTxnFrom==='function'){ try{ await ensureTxnFrom(''); }catch(e){} }
+  renderBudget();
+}
+function renderBudget(){
+  const extra=Number(document.getElementById('bud-extra').value)||0;
+  const all=computeBudget(typeof transactions!=='undefined'?transactions:[],lifeToday(),extra);
+  const q=(document.getElementById('bud-q').value||'').trim().toLowerCase();
+  const rows=q?all.filter(r=>(r.name+' '+r.code+' '+r.cat+' '+r.supplier).toLowerCase().includes(q)):all;
+  budRows=rows;
+  const el=document.getElementById('bud-body');
+  if(!all.length){ el.innerHTML='<div class="empty" style="padding:24px 0">No parts used in the last 12 months.</div>'; return; }
+  const sum=(k,list=rows)=>list.reduce((a,r)=>a+r[k],0);
+  const total=sum('yearCost'), buy=sum('buyCost'), missing=rows.filter(r=>r.noCost);
+  const key=document.getElementById('bud-group').value, label={cat:'category',supplier:'supplier',loc:'location'}[key];
+  const groups={};
+  rows.forEach(r=>{ const g=r[key]||'(no '+label+')'; groups[g]=(groups[g]||0)+r.yearCost; });
+  const gl=Object.entries(groups).sort((a,b)=>b[1]-a[1]);
+  const top=gl.length?gl[0][1]:0;
+  el.innerHTML=`
+    <div class="bud-tiles">
+      <div class="bud-tile"><small>Yearly budget</small><b>${budRM(total)}</b><span>${extra?'incl. +'+extra+'% contingency':'no contingency'}</span></div>
+      <div class="bud-tile"><small>Per month</small><b>${budRM(total/12)}</b><span>average</span></div>
+      <div class="bud-tile"><small>To buy</small><b>${budRM(buy)}</b><span>after stock on hand</span></div>
+      <div class="bud-tile"><small>Parts</small><b>${rows.length}</b><span>used in the last year</span></div>
+    </div>
+    ${missing.length?`<div class="bud-warn">⚠ ${missing.length} part(s) have no Unit Cost, so they count as RM 0. Add the cost in Edit Part to make the budget complete.</div>`:''}
+    <div class="bud-sec">By ${label}</div>
+    ${gl.slice(0,12).map(([g,v])=>`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px"><span>${lifeEsc(g)}</span><b>${budRM(v)}${total?` <span style="font-weight:500;color:var(--text3);font-size:11px">${Math.round(v/total*100)}%</span>`:''}</b></div><div class="bud-bar"><i style="width:${top?Math.max(2,v/top*100):0}%"></i></div></div>`).join('')}
+    <div class="bud-sec">Parts (highest cost first)</div>
+    ${rows.slice(0,200).map(r=>`<div class="bud-row"><div class="n"><b>${lifeEsc(r.name)}</b>
+      <small>${lifeEsc(r.code||'-')} · ~${r.perYear} ${lifeEsc(r.unit)}/year → plan <b>${r.qty}</b> · stock ${r.stock} · buy <b>${r.buy}</b> · ${r.method}</small></div>
+      <div class="v">${r.noCost?'<span style="color:var(--amber-text,#92400E)">no cost</span>':budRM(r.yearCost)}<small>${r.noCost?'':'@ '+budRM(r.cost)}</small></div></div>`).join('')}
+    ${rows.length>200?'<div class="empty" style="padding:10px 0">Showing 200 — search or export for all.</div>':''}`;
+}
+function exportBudget(){
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
+  const extra=Number(document.getElementById('bud-extra').value)||0;
+  const head=['Part','Code','Category','Supplier','Location','Unit','Est. use / year','Plan qty (incl. '+extra+'%)','Unit cost (RM)','Yearly cost (RM)','Stock','To buy','To buy cost (RM)','Method'];
+  const rows=budRows.map(r=>[r.name,r.code,r.cat,r.supplier,r.loc,r.unit,r.perYear,r.qty,r.noCost?'':r.cost,Math.round(r.yearCost*100)/100,r.stock,r.buy,Math.round(r.buyCost*100)/100,r.method]);
+  const tot=['TOTAL','','','','','','','','',Math.round(budRows.reduce((a,r)=>a+r.yearCost,0)*100)/100,'','',Math.round(budRows.reduce((a,r)=>a+r.buyCost,0)*100)/100,''];
+  const wb=XLSX.utils.book_new(), ws=XLSX.utils.aoa_to_sheet([head,...rows,[],tot]);
+  ws['!cols']=[{wch:36},{wch:14},{wch:16},{wch:22},{wch:12},{wch:7},{wch:10},{wch:12},{wch:11},{wch:13},{wch:7},{wch:7},{wch:13},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,ws,'Budget');
+  XLSX.writeFile(wb,'SpareTrack_Budget_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Budget exported ✓');
+}
+document.getElementById('m-bud').addEventListener('click',e=>{if(e.target===document.getElementById('m-bud'))closeM('m-bud');});
+(function(){
+  const rpt=document.getElementById('rpt'); if(!rpt||document.getElementById('bud-open')) return;
+  const b=document.createElement('button'); b.id='bud-open'; b.className='life-open-btn'; b.onclick=openBudget;
+  b.innerHTML='<span style="font-size:22px">💰</span><span><b style="font-size:14px">Spare Part Budget</b><br><span style="font-size:12px;color:var(--text2)">Next 12 months: yearly use × unit cost · what to buy</span></span>';
+  const after=document.getElementById('pm-open')||document.getElementById('life-open');
+  after&&after.nextSibling?rpt.insertBefore(b,after.nextSibling):rpt.appendChild(b);
 })();
 </script>

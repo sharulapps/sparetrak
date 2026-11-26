@@ -526,6 +526,37 @@ const TUTORIALS = [
       await point(p, p.locator('#m-pm button', { hasText: 'Export for VELOXA' }), 600);
       await cap(p, 'In VELOXA: open the project → Import Excel → pick the file', 'Import it again later: the same PM tasks are updated, not duplicated', 4200);
     } },
+  { id: '15-budget', title: 'Spare part budget', sub: 'Yearly use × unit cost · what to buy', roles: 'Admin · Manager · Engineer',
+    async setup() {
+      const txns = FLAVOR === 'v2' ? 'tenants/abc/transactions' : 'transactions';
+      const day = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+      const costs = { demo2: 38.5, demo8: 24, demo10: 1450, demo9: 3.2, demo1: 12, demo5: 65 };
+      for (const [id, cost] of Object.entries(costs)) await DB.doc(`${partsPath()}/${id}`).update({ cost });
+      const hist = [['demo2', 'BEARING 6205 2RS', [350, 280, 212, 140, 72, 30], 2], ['demo8', 'V-BELT A42', [215, 170, 126, 80, 35], 1],
+        ['demo10', 'GEAR MOTOR 0.75KW', [350, 170], 1], ['demo9', 'FUSE 10A', [300, 250, 190, 150, 90, 40, 10], 4],
+        ['demo1', 'SWITCH SOCKET 13AMP PLASTIC', [200, 60], 2], ['demo5', 'ELECTRICAL PARTS - BUSSMAN 100ET', [120, 20], 1],
+        ['demo3', 'WATERJET - GLAND COLLAR 1/4"', [100, 30], 1]];
+      let i = 0;
+      for (const [id, name, agos, qty] of hist) for (const a of agos)
+        await DB.doc(`${txns}/bud${i++}`).set({ partId: id, partName: name, type: 'out', qty, date: day(a), machine: 'Line 1', user: 'Hafiz (Technician)', createdAt: Date.now() - a * 864e5 });
+    },
+    async run(p) {
+      await login(p, 'manager@abc.test', { show: false, intro: ['Spare part budget', 'Yearly use × unit cost · what to buy'] });
+      await goTab(p, 'Reports');
+      await cap(p, 'Reports → Spare Part Budget', '', 600);
+      await tap(p, '#bud-open', 1500);
+      await p.waitForSelector('#bud-body .bud-tile', { timeout: 20000 });
+      await cap(p, 'Next 12 months, from what you actually use', 'Each part: use per year × its Unit Cost', 3200);
+      await cap(p, 'Yearly budget, per month, and what you still have to buy', '"To buy" = after the stock already on the shelf', 3400);
+      await cap(p, 'Add a contingency for breakdowns', '', 600);
+      await tap(p, '#bud-extra', 500); await p.keyboard.press('Escape'); await wait(p, 1200);
+      await p.locator('#bud-body .bud-sec').first().scrollIntoViewIfNeeded(); await wait(p, 600);
+      await cap(p, 'Where the money goes: by category, supplier or location', '', 3000);
+      await p.locator('#bud-body .bud-row').first().scrollIntoViewIfNeeded(); await wait(p, 600);
+      await cap(p, 'Every part: use / year, plan qty, stock, to buy', 'Parts without a Unit Cost are flagged — add it in Edit Part', 3600);
+      await cap(p, 'Export Excel for the budget proposal', '', 900);
+      await point(p, p.locator('#m-bud button', { hasText: 'Export Excel' }), 1200);
+    } },
 ];
 
 // ── Run ───────────────────────────────────────────────────
