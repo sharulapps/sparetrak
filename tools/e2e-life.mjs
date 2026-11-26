@@ -94,9 +94,11 @@ try {
   await p.click('#life-open');
   await p.waitForFunction(() => document.querySelectorAll('#life-list .life-card').length > 0, null, { timeout: 15000 });
   check('Older history loaded for the report', await p.evaluate(() => transactions.some(t => t.id === 'old0')));
-  const rows = await p.evaluate(() => lifeRows.map(r => ({ m: r.machine, outs: r.outs, avg: r.avg, gaps: r.events.map(e => e.gap), st: r.status })));
+  const rows = await p.evaluate(() => lifeRows.map(r => ({ m: r.machine, outs: r.outs, avg: r.avg, gaps: r.events.map(e => e.gap), st: r.status, perYear: r.perYear })));
   const l1 = rows.find(r => /line 1/i.test(r.m)), l3 = rows.find(r => /line 3/i.test(r.m));
   check('Line 1: 5 OUTs, ~70 days apart', l1 && l1.outs === 5 && JSON.stringify(l1.gaps) === '[null,70,70,70,70]' && l1.avg === 70, JSON.stringify(l1));
+  check('Use per year: Line 1 4 pcs over 280 days = 5.2 / year; Line 3 2 over 275 = 2.7', l1 && l1.perYear === 5.2 && l3 && l3.perYear === 2.7, `${l1 && l1.perYear} / ${l3 && l3.perYear}`);
+  check('Use per year shown on the card', /Uses ~5\.2 pcs\/year/.test(await p.textContent('#life-list')));
   check('Line 3: returned OUT not counted (280, 200, 5 days ago)', l3 && l3.outs === 3 && JSON.stringify(l3.gaps) === '[null,80,195]', JSON.stringify(l3));
   check('Waterjet (one OUT) needs more data', (await p.evaluate(() => document.getElementById('life-filter').value = 'all') && true) && await p.evaluate(() => { renderLife(); return lifeRows.some(r => r.machine === 'Waterjet' && r.avg == null); }));
   await p.evaluate(() => { document.getElementById('life-filter').value = 'data'; renderLife(); });
@@ -104,8 +106,8 @@ try {
   await p.waitForTimeout(300);
   await p.screenshot({ path: 'screenshots/60-part-lifespan.png' });
   await p.selectOption('#life-group', 'part');
-  const one = await p.evaluate(() => lifeRows.length);
-  check('"Part only" groups all machines together', one === 1, String(one));
+  const one = await p.evaluate(() => lifeRows.map(r => r.perYear));
+  check('"Part only" groups all machines together, use per year for all (8 pcs over 300 days = 9.7)', one.length === 1 && one[0] === 9.7, JSON.stringify(one));
   await p.selectOption('#life-group', 'machine');
   await p.fill('#life-q', 'line 3');
   check('Search filters by machine', await p.evaluate(() => lifeRows.length === 1 && /line 3/i.test(lifeRows[0].machine)));

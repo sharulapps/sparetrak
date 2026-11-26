@@ -4538,7 +4538,7 @@ document.getElementById('m-help').addEventListener('click',e=>{if(e.target===doc
     <span>Part Lifespan</span>
     <button class="close" aria-label="Close" onclick="closeM('m-life')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
-  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Days between OUTs of the same part on the same machine = how long the part lasts. Next change = last OUT + that many days. Returns are subtracted; OUTs on the same day count once. Needs at least 2 OUTs.</div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Days between OUTs of the same part on the same machine = how long the part lasts. Next change = last OUT + that many days. Use / year = quantity taken ÷ time between the first and last OUT. Returns are subtracted; OUTs on the same day count once. Needs at least 2 OUTs.</div>
   <div class="life-ctl">
     <input id="life-q" placeholder="Search part, code or machine" oninput="renderLife()">
     <select id="life-group" onchange="renderLife()"><option value="machine">Part + machine</option><option value="part">Part only (all machines)</option></select>
@@ -4609,7 +4609,10 @@ function computeLifespan(txns,byMachine,today){
     const gaps=ev.slice(1).map((e,i)=>Math.round((e.d-ev[i].d)/LIFE_DAY));
     const qty=ev.reduce((a,e)=>a+e.qty,0);
     const r={partId:g.partId,partName:g.partName,machine:g.machine,events:ev.map((e,i)=>({date:e.d,qty:e.qty,by:[...e.by].join(', '),gap:i?gaps[i-1]:null})),
-      outs:ev.length,qty,last:ev[ev.length-1].d,avg:null,min:null,max:null,next:null,status:'low',lastGap:gaps.length?gaps[gaps.length-1]:null};
+      outs:ev.length,qty,last:ev[ev.length-1].d,avg:null,min:null,max:null,next:null,status:'low',perYear:null,lastGap:gaps.length?gaps[gaps.length-1]:null};
+    // Estimated use per year: qty taken after the first OUT, over the days from first to last OUT
+    const span=(r.last-ev[0].d)/LIFE_DAY;
+    if(span>0){ const y=(qty-ev[0].qty)/span*365; r.perYear=y<10?Math.round(y*10)/10:Math.round(y); }
     if(gaps.length){
       r.avg=Math.round(gaps.reduce((a,b)=>a+b,0)/gaps.length); r.min=Math.min(...gaps); r.max=Math.max(...gaps);
       r.next=r.last+r.avg*LIFE_DAY;
@@ -4665,6 +4668,7 @@ function renderLife(){
       <div class="life-stats">
         <span class="life-chip">OUTs <b>${r.outs}</b> (${r.qty} ${lifeEsc(r.unit)})</span>
         ${r.avg!=null?`<span class="life-chip">Lasts <b>~${r.avg} days</b></span><span class="life-chip">Min ${r.min} · Max ${r.max} d</span>`:''}
+        ${r.perYear!=null?`<span class="life-chip">Uses <b>~${r.perYear} ${lifeEsc(r.unit)}/year</b></span>`:''}
         <span class="life-chip">Last OUT <b>${lifeFmt(r.last)}</b></span>
         ${r.next!=null?`<span class="life-chip">Next change ~<b>${lifeFmt(r.next)}</b></span>`:''}
         ${r.stock!=null?`<span class="life-chip">Stock <b>${lifeEsc(r.stock)}</b></span>`:''}
@@ -4677,8 +4681,8 @@ function toggleLife(i){ const e=document.getElementById('life-h'+i); if(e) e.sty
 function exportLife(){
   if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
   const byMachine=document.getElementById('life-group').value==='machine';
-  const head=['Part','Code',...(byMachine?['Machine / Location']:[]),'OUTs','Qty out','Avg days between OUTs','Min days','Max days','Last OUT','Next change','Days to next change','Status','Failed early'];
-  const rows=lifeRows.map(r=>[r.partName,r.code,...(byMachine?[r.machine||'(not recorded)']:[]),r.outs,r.qty,r.avg??'',r.min??'',r.max??'',lifeFmt(r.last),r.next!=null?lifeFmt(r.next):'',r.daysLeft??'',
+  const head=['Part','Code',...(byMachine?['Machine / Location']:[]),'OUTs','Qty out','Est. use / year','Avg days between OUTs','Min days','Max days','Last OUT','Next change','Days to next change','Status','Failed early'];
+  const rows=lifeRows.map(r=>[r.partName,r.code,...(byMachine?[r.machine||'(not recorded)']:[]),r.outs,r.qty,r.perYear??'',r.avg??'',r.min??'',r.max??'',lifeFmt(r.last),r.next!=null?lifeFmt(r.next):'',r.daysLeft??'',
     r.avg==null?'Need more data':r.status==='over'?'Next change overdue':r.status==='soon'?'Next change soon':'OK',r.early?'YES':'']);
   const hist=[['Part','Code',...(byMachine?['Machine / Location']:[]),'OUT date','Qty','Days after previous','By']];
   lifeRows.forEach(r=>r.events.forEach(e=>hist.push([r.partName,r.code,...(byMachine?[r.machine||'(not recorded)']:[]),lifeFmt(e.date),e.qty,e.gap??'',e.by])));

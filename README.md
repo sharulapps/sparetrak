@@ -23,7 +23,7 @@ tools/e2e.mjs            browser walkthrough on emulators (28 checks + screensho
 tools/test-migrate.mjs   migration rehearsal old project → new project (18 checks)
 tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks)
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
-tools/e2e-life.mjs       Part Lifespan report (13 checks)
+tools/e2e-life.mjs       Part Lifespan report (15 checks)
 tools/e2e-pm.mjs         PM Schedule + VELOXA import (11 checks)
 tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (17 checks)
 tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
@@ -135,7 +135,7 @@ the same choices as the QR scanner. It is separate from the QR scanner (own moda
 OUT / RETURN / Request OUT ask for the **Machine / Location used** (optional, free text with
 suggestions; "Line 1" and "line 1" count as one). Transactions store it as `machine`.
 **Reports → Part Lifespan** groups OUTs per part + machine (or per part) and shows days between
-OUTs (average / min / max), last OUT and **Next change** (last OUT + average; red when overdue, yellow within 14 days), and
+OUTs (average / min / max), **estimated use per year** (qty after the first OUT ÷ days from first to last OUT × 365), last OUT and **Next change** (last OUT + average; red when overdue, yellow within 14 days), and
 "Failed early" (the last part lasted under half the usual time). RETURNs cancel the latest earlier
 OUT; OUTs on the same day count once; stocktake adjustments are ignored. Needs 2+ OUTs. Opening it
 loads the full transaction history once (it is cached after that). Export Excel included.
