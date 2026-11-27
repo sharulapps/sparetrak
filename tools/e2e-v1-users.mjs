@@ -90,6 +90,15 @@ try {
   check('Enabled user signs in again', true);
   const role = (await db.doc('users/' + uid.technician).get()).data();
   check('Role and name kept', role.role === 'technician' && role.name === 'Riezhan');
+
+  // Suppliers module on the old app (root collection suppliers/)
+  await adm.evaluate(() => openSuppliers());
+  await adm.waitForSelector('#m-sup.open #sup-q');
+  await adm.evaluate(() => supForm());
+  await adm.fill('#sf-name', 'DPSTAR Thermo Electric Sdn Bhd'); await adm.fill('#sf-phone', '0123456789');
+  await adm.click('#m-sup >> text=Save supplier');
+  await adm.waitForSelector('#m-sup a[href="https://wa.me/60123456789"]', { timeout: 15000 });
+  check('Old app: supplier saved to suppliers/ with WhatsApp link', (await db.collection('suppliers').get()).docs.some(d => d.data().name === 'DPSTAR Thermo Electric Sdn Bhd'));
 } catch (e) { console.error('E2E error:', e); results.push(false); }
 await browser.close();
 try { process.kill(-server.pid); } catch (e) {}

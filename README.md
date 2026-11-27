@@ -165,6 +165,18 @@ Max Stock, supplier, cost, signature lines), Stock valuation, PM schedule, Spare
 on the reports is set in the dialog (remembered per device). jsPDF 2.5.1 + autoTable 3.8.2 from cdnjs,
 loaded only when a report is made.
 
+## Suppliers
+
+Menu → **Suppliers**. One record per supplier: contact person, phone, email, lead time, payment terms, address, notes.
+- Parts link to a supplier by the **Supplier** name on the part (case and punctuation ignored). Each supplier shows its parts, stock value and the parts to reorder.
+- **Add N from parts** creates records for supplier names already used on parts.
+- Call / WhatsApp / Email buttons; Malaysian numbers starting with 0 become 60… for WhatsApp.
+- Renaming a supplier offers to change the name on its parts. Deleting a supplier keeps the name on parts.
+- The part form suggests supplier names. Export Excel lists every supplier with its figures.
+- Admin, manager, engineer and purchasing can add / edit / delete; everyone else can view.
+
+Data: `tenants/{tid}/suppliers/{id}` (rules: read members; write admin/manager/engineer/purchasing; name required). **Re-publish firestore.rules after this change.**
+
 ## Spare Part Budget
 
 **Reports → Spare Part Budget**: the next 12 months, per part = estimated use per year × Unit Cost.

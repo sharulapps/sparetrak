@@ -5613,3 +5613,196 @@ document.getElementById('m-pdf').addEventListener('click',e=>{if(e.target===docu
   v?rpt.insertBefore(b,v):rpt.appendChild(b);
 })();
 </script>
+
+<!-- ═══ SUPPLIERS: supplier records, linked to parts by the supplier name on each part ═══ -->
+<style>
+#m-sup{z-index:1050}
+#m-sup .sheet{max-width:860px;max-height:92vh}
+#m-sup .sup-ctl{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+#m-sup .sup-ctl input{flex:1 1 200px;min-width:0;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px}
+#m-sup .sup-card{border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;background:var(--bg);cursor:pointer}
+#m-sup .sup-card:hover{border-color:var(--blue)}
+#m-sup .sup-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+#m-sup .sup-name{font-weight:700;font-size:14px;color:var(--navy)}
+#m-sup .sup-sub{font-size:12px;color:var(--text2);margin-top:2px}
+#m-sup .sup-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+#m-sup .sup-chip{font-size:11.5px;padding:3px 8px;border-radius:8px;background:var(--bg2);color:var(--text2);white-space:nowrap}
+#m-sup .sup-chip b{color:var(--text)} #m-sup .sup-chip.warn{background:#FEF2F2;color:#B91C1C} #m-sup .sup-chip.warn b{color:inherit}
+#m-sup .sup-links{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+#m-sup .sup-links a{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:10px;border:1px solid var(--border2);text-decoration:none;color:var(--navy);font-size:13px;font-weight:600;background:#fff}
+#m-sup .sup-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px 14px;font-size:13px;margin:8px 0 6px}
+#m-sup .sup-info small{display:block;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px}
+#m-sup .sup-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+#m-sup .sup-tbl th{text-align:left;padding:7px 8px;background:var(--bg2);color:var(--text2);font-weight:700}
+#m-sup .sup-tbl td{padding:7px 8px;border-bottom:1px solid var(--border)}
+#m-sup .sup-sec{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);margin:14px 0 6px}
+</style>
+<div class="overlay" id="m-sup">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span id="sup-title">Suppliers</span>
+    <button class="close" aria-label="Close" onclick="closeM('m-sup')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div id="sup-body"></div>
+</div>
+</div>
+<datalist id="supplier-dl"></datalist>
+<script>
+let suppliers=null, supLoading=null;
+const SUP_EDIT_ROLES=['admin','manager','engineer','purchasing'];
+function supCanEdit(){ return !!(typeof currentUser!=='undefined'&&currentUser&&SUP_EDIT_ROLES.includes(currentUser.role)); }
+// "DPSTAR Thermo Electric Sdn. Bhd." and "dpstar thermo electric sdn bhd" are the same supplier
+function supKey(v){ return String(v||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+function supEsc(v){ return typeof lifeEsc==='function'?lifeEsc(v):String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function loadSuppliers(force){
+  if(suppliers&&!force) return suppliers;
+  if(supLoading&&!force) return supLoading;
+  supLoading=(async()=>{
+    const {collection,getDocs,db}=window._fs;
+    const s=await getDocs(collection(db,'suppliers'));
+    suppliers=s.docs.map(d=>({...d.data(),id:d.id})).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    fillSupplierList();
+    return suppliers;
+  })();
+  try{ return await supLoading; }finally{ supLoading=null; }
+}
+function fillSupplierList(){
+  const dl=document.getElementById('supplier-dl'); if(!dl) return;
+  const names=new Map();
+  (suppliers||[]).forEach(s=>names.set(supKey(s.name),s.name));
+  (typeof parts!=='undefined'?parts:[]).forEach(p=>{ if(p.supplier&&!names.has(supKey(p.supplier))) names.set(supKey(p.supplier),p.supplier); });
+  dl.innerHTML=[...names.values()].sort().map(n=>`<option value="${supEsc(n)}">`).join('');
+}
+function supParts(s){ const k=supKey(s.name); return (typeof parts!=='undefined'?parts:[]).filter(p=>supKey(p.supplier)===k); }
+function supStats(s){
+  const ps=supParts(s), st=p=>typeof stockStatus==='function'?stockStatus(p):'ok';
+  return {parts:ps.length,value:ps.reduce((a,p)=>a+Math.max(0,Number(p.qty)||0)*(Number(p.cost)||0),0),reorder:ps.filter(p=>['low','near'].includes(st(p)))};
+}
+function supWa(phone){ let d=String(phone||'').replace(/\D/g,''); if(!d) return ''; if(d.startsWith('0')) d='6'+d; return 'https://wa.me/'+d; }
+async function openSuppliers(){
+  document.getElementById('m-sup').classList.add('open');
+  document.getElementById('sup-body').innerHTML='<div class="empty" style="padding:24px 0">Loading...</div>';
+  try{ await loadSuppliers(true); }catch(e){ document.getElementById('sup-body').innerHTML='<div class="empty" style="padding:24px 0">Could not load suppliers: '+supEsc(e.code||e.message)+'</div>'; return; }
+  supList();
+}
+function supList(){
+  document.getElementById('sup-title').textContent='Suppliers';
+  const q=supKey(document.getElementById('sup-q')?.value||'');
+  const missing=supMissingNames();
+  const list=(suppliers||[]).filter(s=>!q||supKey([s.name,s.contact,s.phone,s.email].join(' ')).includes(q));
+  const ed=supCanEdit();
+  document.getElementById('sup-body').innerHTML=`
+    <div class="sup-ctl">
+      <input id="sup-q" placeholder="Search supplier, contact, phone" value="${supEsc(document.getElementById('sup-q')?.value||'')}" oninput="supList();document.getElementById('sup-q').focus();this.setSelectionRange(this.value.length,this.value.length)">
+      ${ed?`<button class="act" onclick="supForm()" style="justify-content:center;padding:9px 12px">+ Add supplier</button>`:''}
+      ${ed&&missing.length?`<button class="act" onclick="supImportFromParts()" style="justify-content:center;padding:9px 12px">Add ${missing.length} from parts</button>`:''}
+      <button class="act" onclick="exportSuppliers()" style="justify-content:center;padding:9px 12px">Export Excel</button>
+    </div>
+    ${!(suppliers||[]).length?`<div class="empty" style="padding:20px 0">No suppliers yet.${ed&&missing.length?' Tap "Add '+missing.length+' from parts" to start with the supplier names already on your parts.':''}</div>`:''}
+    ${list.map(s=>{ const st=supStats(s); return `<div class="sup-card" onclick="supDetail('${supEsc(s.id)}')">
+      <div class="sup-top"><div style="min-width:0"><div class="sup-name">${supEsc(s.name)}</div>
+        <div class="sup-sub">${[s.contact,s.phone,s.email].filter(Boolean).map(supEsc).join(' · ')||'<i>no contact details</i>'}</div></div>
+        ${s.leadTime?`<span class="sup-chip">Lead time <b>${supEsc(s.leadTime)}</b></span>`:''}</div>
+      <div class="sup-chips"><span class="sup-chip">Parts <b>${st.parts}</b></span><span class="sup-chip">Stock value <b>${budRM(st.value)}</b></span>
+        ${st.reorder.length?`<span class="sup-chip warn">To reorder <b>${st.reorder.length}</b></span>`:''}</div></div>`; }).join('')}`;
+}
+function supMissingNames(){
+  const have=new Set((suppliers||[]).map(s=>supKey(s.name))), out=new Map();
+  (typeof parts!=='undefined'?parts:[]).forEach(p=>{ const k=supKey(p.supplier); if(k&&!have.has(k)&&!out.has(k)) out.set(k,String(p.supplier).trim()); });
+  return [...out.values()];
+}
+async function supImportFromParts(){
+  const names=supMissingNames(); if(!names.length) return;
+  if(!confirm('Add '+names.length+' supplier(s) from the names already on your parts?\n\n'+names.slice(0,10).join('\n')+(names.length>10?'\n…':''))) return;
+  const {collection,addDoc,db}=window._fs;
+  let n=0;
+  for(const name of names){ try{ await addDoc(collection(db,'suppliers'),{name,contact:'',phone:'',email:'',address:'',leadTime:'',terms:'',notes:'',createdAt:Date.now(),createdBy:currentUser?currentUser.uid:''}); n++; }catch(e){ toast('Could not add suppliers: '+(e.code||e.message)); break; } }
+  await loadSuppliers(true); supList();
+  if(n) toast(n+' supplier(s) added ✓ — tap one to add phone and email');
+}
+function supDetail(id){
+  const s=(suppliers||[]).find(x=>x.id===id); if(!s) return;
+  const st=supStats(s), ps=supParts(s), ed=supCanEdit(), wa=supWa(s.phone);
+  const label=p=>typeof stockLabel==='function'?stockLabel(p):'';
+  document.getElementById('sup-title').textContent=s.name;
+  document.getElementById('sup-body').innerHTML=`
+    <button class="act" onclick="supList()" style="padding:7px 12px;margin-bottom:8px">‹ All suppliers</button>
+    <div class="sup-links">
+      ${s.phone?`<a href="tel:${supEsc(String(s.phone).replace(/[^\d+]/g,''))}">📞 Call</a>`:''}
+      ${wa?`<a href="${wa}" target="_blank" rel="noopener">💬 WhatsApp</a>`:''}
+      ${s.email?`<a href="mailto:${supEsc(s.email)}">✉ Email</a>`:''}
+      ${ed?`<a href="#" onclick="supForm('${supEsc(s.id)}');return false">✎ Edit</a>`:''}
+    </div>
+    <div class="sup-info">
+      ${[['Contact person',s.contact],['Phone',s.phone],['Email',s.email],['Lead time',s.leadTime],['Payment terms',s.terms],['Address',s.address],['Notes',s.notes]].filter(x=>x[1]).map(([l,v])=>`<div><small>${l}</small>${supEsc(v)}</div>`).join('')||'<div style="color:var(--text3)">No details yet.</div>'}
+    </div>
+    <div class="sup-chips"><span class="sup-chip">Parts <b>${st.parts}</b></span><span class="sup-chip">Stock value <b>${budRM(st.value)}</b></span>${st.reorder.length?`<span class="sup-chip warn">To reorder <b>${st.reorder.length}</b></span>`:''}</div>
+    ${st.reorder.length?`<div class="sup-sec">To reorder from this supplier</div><table class="sup-tbl"><tr><th>Part</th><th>Code</th><th>Stock</th><th>Min / Max</th></tr>${st.reorder.map(p=>`<tr><td>${supEsc(p.name)}</td><td>${supEsc(p.code||'-')}</td><td><b>${supEsc(p.qty)}</b> ${supEsc(p.unit||'')}</td><td>${supEsc(p.min||0)} / ${supEsc(p.max||'-')}</td></tr>`).join('')}</table>`:''}
+    <div class="sup-sec">Parts from this supplier (${ps.length})</div>
+    ${ps.length?`<table class="sup-tbl"><tr><th>Part</th><th>Code</th><th>Stock</th><th>Status</th><th>Unit cost</th></tr>${ps.map(p=>`<tr><td>${supEsc(p.name)}</td><td>${supEsc(p.code||'-')}</td><td>${supEsc(p.qty)} ${supEsc(p.unit||'')}</td><td>${supEsc(label(p))}</td><td>${p.cost?budRM(p.cost):'-'}</td></tr>`).join('')}</table>`:'<div class="empty" style="padding:10px 0">No part uses this supplier name yet. Set it in Edit Part → Supplier.</div>'}
+    ${ed?`<div style="margin-top:16px"><button class="act" style="color:var(--red-text);padding:8px 12px" onclick="supDelete('${supEsc(s.id)}')">Delete supplier</button></div>`:''}`;
+}
+const SUP_FIELDS=[['name','Supplier name *'],['contact','Contact person'],['phone','Phone'],['email','Email'],['leadTime','Lead time (e.g. 2 weeks)'],['terms','Payment terms (e.g. 30 days)'],['address','Address'],['notes','Notes']];
+function supForm(id){
+  if(!supCanEdit()) return;
+  const s=id?(suppliers||[]).find(x=>x.id===id):{};
+  document.getElementById('sup-title').textContent=id?'Edit supplier':'New supplier';
+  document.getElementById('sup-body').innerHTML=`
+    <button class="act" onclick="${id?`supDetail('${supEsc(id)}')`:'supList()'}" style="padding:7px 12px;margin-bottom:10px">‹ Back</button>
+    ${SUP_FIELDS.map(([k,l])=>`<div class="fg"><label>${l}</label>${k==='address'||k==='notes'?`<textarea id="sf-${k}" rows="2">${supEsc(s[k]||'')}</textarea>`:`<input id="sf-${k}" value="${supEsc(s[k]||'')}" ${k==='email'?'type="email"':k==='phone'?'type="tel"':''} maxlength="200">`}</div>`).join('')}
+    <button class="sub-btn" onclick="supSave(${id?`'${supEsc(id)}'`:'null'})">Save supplier</button>`;
+}
+async function supSave(id){
+  const data={}; SUP_FIELDS.forEach(([k])=>{ data[k]=(document.getElementById('sf-'+k).value||'').trim(); });
+  if(!data.name){ toast('Supplier name is required'); return; }
+  const dup=(suppliers||[]).find(x=>x.id!==id&&supKey(x.name)===supKey(data.name));
+  if(dup){ toast('A supplier with this name already exists'); return; }
+  const {collection,addDoc,setDoc,doc,db}=window._fs;
+  const old=id?(suppliers||[]).find(x=>x.id===id):null;
+  try{
+    if(id) await setDoc(doc(db,'suppliers',id),{...data,updatedAt:Date.now(),updatedBy:currentUser?currentUser.uid:''},{merge:true});
+    else id=(await addDoc(collection(db,'suppliers'),{...data,createdAt:Date.now(),createdBy:currentUser?currentUser.uid:''})).id;
+  }catch(e){ toast('Could not save supplier: '+(e.code||e.message)); return; }
+  // Renamed: offer to update the parts that use the old name
+  if(old&&supKey(old.name)!==supKey(data.name)){
+    const ps=supParts(old);
+    if(ps.length&&confirm('Change the supplier name on '+ps.length+' part(s) from "'+old.name+'" to "'+data.name+'"?')){
+      let n=0; for(const p of ps){ try{ const ref=doc(db,'parts',String(p.id)); if(window._fs.updateDoc) await window._fs.updateDoc(ref,{supplier:data.name}); else await setDoc(ref,{supplier:data.name},{merge:true}); p.supplier=data.name; n++; }catch(e){ toast('Could not update parts: '+(e.code||e.message)); break; } }
+      if(n) toast(n+' part(s) updated');
+    }
+  }
+  await loadSuppliers(true);
+  toast('Supplier saved ✓');
+  supDetail(id);
+}
+async function supDelete(id){
+  const s=(suppliers||[]).find(x=>x.id===id); if(!s||!supCanEdit()) return;
+  if(!confirm('Delete supplier "'+s.name+'"?\n\nParts keep the supplier name; only this record (contacts, terms) is removed.')) return;
+  try{ const {deleteDoc,doc,db}=window._fs; await deleteDoc(doc(db,'suppliers',id)); }
+  catch(e){ toast('Could not delete: '+(e.code||e.message)); return; }
+  await loadSuppliers(true); supList(); toast('Supplier deleted');
+}
+function exportSuppliers(){
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
+  const rows=(suppliers||[]).map(s=>{ const st=supStats(s); return [s.name,s.contact||'',s.phone||'',s.email||'',s.leadTime||'',s.terms||'',s.address||'',s.notes||'',st.parts,Math.round(st.value*100)/100,st.reorder.length]; });
+  const wb=XLSX.utils.book_new(), ws=XLSX.utils.aoa_to_sheet([['Supplier','Contact','Phone','Email','Lead time','Payment terms','Address','Notes','Parts','Stock value (RM)','To reorder'],...rows]);
+  ws['!cols']=[{wch:34},{wch:18},{wch:15},{wch:26},{wch:12},{wch:14},{wch:30},{wch:24},{wch:7},{wch:14},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,ws,'Suppliers');
+  XLSX.writeFile(wb,'SpareTrack_Suppliers_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Suppliers exported ✓');
+}
+document.getElementById('m-sup').addEventListener('click',e=>{if(e.target===document.getElementById('m-sup'))closeM('m-sup');});
+(function(){
+  // Menu entry (before PM)
+  const nav=document.querySelector('.nav');
+  if(nav&&!document.getElementById('nav-sup')){
+    const b=document.createElement('button'); b.className='nav-btn'; b.id='nav-sup'; b.onclick=openSuppliers;
+    b.innerHTML='<svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>Suppliers';
+    const pm=document.getElementById('nav-pm')||document.getElementById('nav-help');
+    pm?nav.insertBefore(b,pm):nav.appendChild(b);
+  }
+  // Part form: supplier suggestions from the supplier list and the names already on parts
+  const f=document.getElementById('f-supplier');
+  if(f){ f.setAttribute('list','supplier-dl'); f.setAttribute('autocomplete','off'); f.addEventListener('focus',()=>{ fillSupplierList(); if(!suppliers&&window._fs) loadSuppliers().catch(()=>{}); }); }
+})();
+</script>

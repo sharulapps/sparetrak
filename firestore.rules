@@ -196,6 +196,16 @@ service cloud.firestore {
         allow delete: if hasRole(tid, ['admin']) && deletionLogged(tid, 'approvals', id);
       }
 
+      // Supplier records (contacts, terms). Parts link to them by supplier name.
+      match /suppliers/{id} {
+        allow read: if isMember(tid);
+        allow create, update: if hasRole(tid, ['admin','manager','engineer','purchasing'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 200;
+        allow delete: if hasRole(tid, ['admin','manager','engineer','purchasing']);
+      }
+
       // deletions/{col}~{docId}: tells other devices to drop a deleted doc.
       // Only written together with the real delete (the doc must be gone after the batch).
       match /deletions/{key} {

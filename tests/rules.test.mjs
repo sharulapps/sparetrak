@@ -299,3 +299,16 @@ test('a fake deletions record cannot hide a part that still exists', async () =>
   await assertFails(b.commit());
   await assertFails(setDoc(doc(db, 'tenants/mnsb/deletions/members~x'), { col: 'members', docId: 'x', deletedAt: serverTimestamp() }));
 });
+
+// ── Suppliers ───────────────────────────────────
+test('suppliers: members read, managers write, technicians cannot write', async () => {
+  await assertSucceeds(setDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/suppliers/s1'), { name: 'DPSTAR', phone: '012' }));
+  await assertSucceeds(getDoc(doc(as('mnsb-tech'), 'tenants/mnsb/suppliers/s1')));
+  await assertFails(setDoc(doc(as('mnsb-tech'), 'tenants/mnsb/suppliers/s2'), { name: 'X' }));
+  await assertFails(updateDoc(doc(as('mnsb-tech'), 'tenants/mnsb/suppliers/s1'), { phone: '999' }));
+  await assertFails(deleteDoc(doc(as('mnsb-tech'), 'tenants/mnsb/suppliers/s1')));
+  await assertFails(setDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/suppliers/s3'), { name: '' }));
+  await assertFails(getDoc(doc(as('acme-admin'), 'tenants/mnsb/suppliers/s1')));
+  await assertFails(setDoc(doc(as('acme-admin'), 'tenants/mnsb/suppliers/s4'), { name: 'hack' }));
+  await assertSucceeds(deleteDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/suppliers/s1')));
+});
