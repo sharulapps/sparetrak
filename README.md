@@ -158,6 +158,13 @@ IN/OUT since then) and **Reports → Stock Valuation**: total value, **dead stoc
 6 / 12 / 24 months), **above max** value, breakdown by category / location / supplier, most valuable
 stock, parts without a Unit Cost flagged, Excel export.
 
+## PDF Reports
+
+**Reports → PDF Reports**: Inventory list, Reorder list (low stock + near finish, suggested order qty up to
+Max Stock, supplier, cost, signature lines), Stock valuation, PM schedule, Spare part budget. Company name
+on the reports is set in the dialog (remembered per device). jsPDF 2.5.1 + autoTable 3.8.2 from cdnjs,
+loaded only when a report is made.
+
 ## Spare Part Budget
 
 **Reports → Spare Part Budget**: the next 12 months, per part = estimated use per year × Unit Cost.

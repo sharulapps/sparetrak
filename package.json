@@ -1,7 +1,7 @@
 {
   "name": "sparetrak",
   "version": "1.0.0",
-  "description": "SpareTrack v2 \u2014 spare part management (Firebase + Cloudflare Pages)",
+  "description": "SpareTrack v2 — spare part management (Firebase + Cloudflare Pages)",
   "scripts": {
     "test": "firebase emulators:exec --only firestore --project demo-sparetrack-rules \"node --test tests/rules.test.mjs\"",
     "emulators": "firebase emulators:start --only firestore,auth --project demo-sparetrack",
@@ -32,6 +32,8 @@
   "devDependencies": {
     "@emailjs/browser": "^4.4.1",
     "@tesseract.js-data/eng": "^1.0.0",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
     "jsqr": "^1.4.0",
     "playwright": "^1.56.1",
     "qrcodejs": "^1.0.0",

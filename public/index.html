@@ -5445,3 +5445,171 @@ document.getElementById('m-val').addEventListener('click',e=>{if(e.target===docu
   setInterval(upd,3000); upd();
 })();
 </script>
+
+<!-- ═══ PDF REPORTS (jsPDF, loaded only when a report is made) ═══ -->
+<style>
+#m-pdf{z-index:1050}
+#m-pdf .sheet{max-width:640px}
+#m-pdf .pdf-item{display:flex;gap:12px;align-items:center;width:100%;padding:12px 14px;margin-bottom:8px;border:1px solid var(--border);border-radius:12px;background:var(--bg);cursor:pointer;font-family:inherit;text-align:left;color:var(--text)}
+#m-pdf .pdf-item:hover{border-color:var(--blue)}
+#m-pdf .pdf-item b{font-size:14px} #m-pdf .pdf-item small{display:block;font-size:12px;color:var(--text2);margin-top:2px}
+#m-pdf .pdf-item .pi{font-size:22px;width:28px;text-align:center}
+#m-pdf input,#m-pdf select{box-sizing:border-box;min-width:0;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px}
+</style>
+<div class="overlay" id="m-pdf">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span>PDF Reports</span>
+    <button class="close" aria-label="Close" onclick="closeM('m-pdf')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+    <label style="font-size:12px;color:var(--text2);flex:1 1 100%">Company name on the reports</label>
+    <input id="pdf-company" style="flex:1 1 220px" maxlength="80" onchange="try{localStorage.setItem('st_pdf_company',this.value.trim())}catch(e){}">
+  </div>
+  <button class="pdf-item" onclick="pdfReport('inventory')"><span class="pi">📋</span><span><b>Inventory list</b><small>Every part with stock, min / max, status and location</small></span></button>
+  <button class="pdf-item" onclick="pdfReport('reorder')"><span class="pi">🛒</span><span><b>Reorder list</b><small>Low stock and near finish, suggested quantity, supplier, cost · signature lines</small></span></button>
+  <button class="pdf-item" onclick="pdfReport('valuation')"><span class="pi">📦</span><span><b>Stock valuation</b><small>Total value, by category, dead stock, above max</small></span></button>
+  <button class="pdf-item" onclick="pdfReport('pm')"><span class="pi">🗓</span><span><b>PM schedule</b><small>Preventive replacements due (overdue + the period chosen in PM)</small></span></button>
+  <button class="pdf-item" onclick="pdfReport('budget')"><span class="pi">💰</span><span><b>Spare part budget</b><small>Next 12 months, +10% contingency, by category and part</small></span></button>
+</div>
+</div>
+<script>
+const PDF_LIBS=['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js','https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'];
+let pdfLoading=null;
+function loadPdfLibs(){
+  if(window.jspdf&&window.jspdf.jsPDF&&window.jspdf.jsPDF.API.autoTable) return Promise.resolve();
+  if(!pdfLoading) pdfLoading=PDF_LIBS.reduce((pr,src)=>pr.then(()=>new Promise((res,rej)=>{
+    const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=()=>rej(new Error('Could not load the PDF library — check the internet connection')); document.head.appendChild(s);
+  })),Promise.resolve()).catch(e=>{ pdfLoading=null; throw e; });
+  return pdfLoading;
+}
+function pdfCompany(){
+  let v=''; try{ v=localStorage.getItem('st_pdf_company')||''; }catch(e){}
+  return v||(typeof tenantName==='function'?tenantName():'SpareTrack');
+}
+function openPdf(){
+  document.getElementById('m-pdf').classList.add('open');
+  document.getElementById('pdf-company').value=pdfCompany();
+}
+// Plain text for the PDF fonts (no emoji / arrows)
+function pdfTxt(v){ return String(v==null?'':v).replace(/[^\x20-\x7E -ÿ–—‘’“”•]/g,'').trim(); }
+function pdfRM(v){ return 'RM '+(Number(v)||0).toLocaleString('en-MY',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+// Page header / footer and the table style shared by every report
+function pdfDoc(title,sub,landscape){
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:landscape?'landscape':'portrait',unit:'mm',format:'a4'});
+  const W=doc.internal.pageSize.getWidth();
+  doc.setFillColor(11,31,58); doc.rect(0,0,W,24,'F');
+  doc.setFillColor(37,99,235); doc.roundedRect(12,6,12,12,2,2,'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('ST',18,13.6,{align:'center'});
+  doc.setFontSize(13); doc.text(pdfTxt(pdfCompany()),28,11.5);
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(190,205,230); doc.text('SpareTrack · Spare part management',28,17);
+  doc.setTextColor(11,31,58); doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.text(pdfTxt(title),12,35);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(90,105,130);
+  const who=typeof currentUser!=='undefined'&&currentUser?(currentUser.name||currentUser.email):'';
+  doc.text(pdfTxt((sub?sub+'  ·  ':'')+'Generated '+new Date().toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})+(who?' by '+who:'')),12,41);
+  return doc;
+}
+function pdfTable(doc,opts){
+  doc.autoTable(Object.assign({theme:'grid',styles:{font:'helvetica',fontSize:8.2,cellPadding:1.8,lineColor:[227,233,242],lineWidth:.2,textColor:[30,41,59]},
+    headStyles:{fillColor:[11,31,58],textColor:255,fontStyle:'bold'},alternateRowStyles:{fillColor:[246,249,253]},margin:{left:12,right:12,top:14,bottom:16}},opts));
+  return doc.lastAutoTable.finalY;
+}
+function pdfFinish(doc,file){
+  const n=doc.getNumberOfPages(), W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight();
+  for(let i=1;i<=n;i++){ doc.setPage(i); doc.setFontSize(8); doc.setTextColor(130,146,168); doc.setFont('helvetica','normal');
+    doc.text(pdfTxt(pdfCompany())+' · SpareTrack',12,H-7); doc.text('Page '+i+' of '+n,W-12,H-7,{align:'right'}); }
+  doc.save(file+'_'+new Date().toISOString().slice(0,10)+'.pdf');
+}
+function pdfSection(doc,y,text){ doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(11,31,58); doc.text(pdfTxt(text),12,y); return y+3; }
+function pdfTiles(doc,y,tiles){
+  const W=doc.internal.pageSize.getWidth()-24, w=(W-(tiles.length-1)*4)/tiles.length;
+  tiles.forEach(([label,val,sub],i)=>{ const x=12+i*(w+4);
+    doc.setDrawColor(227,233,242); doc.setFillColor(255,255,255); doc.roundedRect(x,y,w,20,2,2,'FD');
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(130,146,168); doc.text(pdfTxt(label).toUpperCase(),x+3,y+5.5);
+    doc.setFontSize(12.5); doc.setTextColor(11,31,58); doc.text(pdfTxt(val),x+3,y+12.5);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(90,105,130); doc.text(pdfTxt(sub||''),x+3,y+17.5); });
+  return y+26;
+}
+async function pdfReport(kind){
+  const c=document.getElementById('pdf-company'); if(c){ try{ localStorage.setItem('st_pdf_company',c.value.trim()); }catch(e){} }
+  try{ toast('Preparing PDF...'); await loadPdfLibs(); }catch(e){ toast(e.message); return; }
+  if(['valuation','pm','budget'].includes(kind)&&typeof ensureTxnFrom==='function'){ try{ await ensureTxnFrom(''); }catch(e){} }
+  try{ PDF_REPORTS[kind](); toast('PDF ready ✓'); }
+  catch(e){ console.error(e); toast('Could not make the PDF: '+e.message); }
+}
+const PDF_REPORTS={
+  inventory(){
+    const list=[...parts].sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    const doc=pdfDoc('Inventory List',list.length+' parts',true);
+    const label=p=>typeof stockLabel==='function'?stockLabel(p):'';
+    pdfTable(doc,{startY:46,head:[['#','Part','Code','Category','Location','Stock','Unit','Min','Max','Status','Supplier']],
+      body:list.map((p,i)=>[i+1,pdfTxt(p.name),pdfTxt(p.code),pdfTxt(p.cat),pdfTxt(p.loc),p.qty,pdfTxt(p.unit),p.min||0,p.max||'',pdfTxt(label(p)),pdfTxt(p.supplier)]),
+      columnStyles:{0:{cellWidth:8},5:{halign:'right',fontStyle:'bold'},7:{halign:'right'},8:{halign:'right'}},
+      didParseCell:d=>{ if(d.section==='body'&&d.column.index===9){ const v=String(d.cell.raw).toLowerCase(); d.cell.styles.textColor=v.includes('low')?[185,28,28]:v.includes('near')?[180,83,9]:v.includes('over')?[91,60,196]:[4,120,87]; d.cell.styles.fontStyle='bold'; } }});
+    pdfFinish(doc,'SpareTrack_Inventory');
+  },
+  reorder(){
+    const list=(typeof reorderParts==='function'?reorderParts():[]);
+    const doc=pdfDoc('Reorder List',list.length+' part(s) at low stock or below minimum');
+    // Suggested order: up to Max Stock, or twice the minimum when no max is set
+    const rows=list.map(p=>{ const q=Number(p.qty)||0, mn=Number(p.min)||0, mx=Number(p.max)||0; const sug=Math.max(1,(mx>0?mx:Math.max(mn*2,1))-q); const cost=Number(p.cost)||0;
+      return [pdfTxt(p.name),pdfTxt(p.code),q+' '+pdfTxt(p.unit),mn,mx||'',sug,pdfTxt(p.supplier)||'-',cost?pdfRM(cost):'-',cost?pdfRM(cost*sug):'-']; });
+    const total=list.reduce((a,p)=>{ const q=Number(p.qty)||0, mn=Number(p.min)||0, mx=Number(p.max)||0; return a+(Number(p.cost)||0)*Math.max(1,(mx>0?mx:Math.max(mn*2,1))-q); },0);
+    let y=pdfTable(doc,{startY:46,head:[['Part','Code','Stock','Min','Max','Order qty','Supplier','Unit cost','Est. cost']],body:rows.length?rows:[['No parts need reordering','','','','','','','','']],
+      foot:[['','','','','','','','Total',pdfRM(total)]],footStyles:{fillColor:[244,247,252],textColor:[11,31,58],fontStyle:'bold'},
+      columnStyles:{3:{halign:'right'},4:{halign:'right'},5:{halign:'right',fontStyle:'bold'},7:{halign:'right'},8:{halign:'right'}}});
+    const H=doc.internal.pageSize.getHeight(); if(y>H-50){ doc.addPage(); y=20; }
+    y+=22; doc.setDrawColor(120,130,150);
+    [['Prepared by',12],['Checked by',76],['Approved by',140]].forEach(([l,x])=>{ doc.line(x,y,x+56,y); doc.setFontSize(8.5); doc.setTextColor(90,105,130); doc.text(l,x,y+5); doc.text('Name / date:',x,y+10); });
+    pdfFinish(doc,'SpareTrack_Reorder_List');
+  },
+  valuation(){
+    const rows=computeValuation(typeof transactions!=='undefined'?transactions:[],lifeToday(),365).filter(r=>r.qty>0).sort((a,b)=>b.value-a.value);
+    const sum=(l,k)=>l.reduce((a,r)=>a+r[k],0), dead=rows.filter(r=>r.dead), over=rows.filter(r=>r.over>0), tr=stockValueTrend();
+    const doc=pdfDoc('Stock Valuation','Stock x unit cost');
+    let y=pdfTiles(doc,46,[['Stock value',pdfRM(sum(rows,'value')),(tr.diff>=0?'+':'-')+pdfRM(Math.abs(tr.diff)).replace('RM ','RM')+' vs 30 days ago'],['Dead stock',pdfRM(sum(dead,'value')),dead.length+' part(s), no OUT 12 months'],['Above max',pdfRM(sum(over,'over')),over.length+' part(s)'],['Parts in stock',String(rows.length),sum(rows,'qty')+' units']]);
+    const g={}; rows.forEach(r=>{ const k=r.cat||'(no category)'; g[k]=(g[k]||0)+r.value; }); const total=sum(rows,'value');
+    y=pdfSection(doc,y,'By category');
+    y=pdfTable(doc,{startY:y,head:[['Category','Value','Share']],body:Object.entries(g).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[pdfTxt(k),pdfRM(v),total?Math.round(v/total*100)+'%':'']),columnStyles:{1:{halign:'right'},2:{halign:'right'}}})+8;
+    if(dead.length){ y=pdfSection(doc,y,'Dead stock (no OUT for 12 months)'); y=pdfTable(doc,{startY:y,head:[['Part','Code','Stock','Last OUT','Value']],body:dead.sort((a,b)=>b.value-a.value).map(r=>[pdfTxt(r.name),pdfTxt(r.code),r.qty+' '+pdfTxt(r.unit),r.lastOut!=null?lifeFmt(r.lastOut):'never',pdfRM(r.value)]),columnStyles:{4:{halign:'right'}}})+8; }
+    y=pdfSection(doc,y,'All stock by value');
+    pdfTable(doc,{startY:y,head:[['Part','Code','Stock','Unit cost','Value']],body:rows.map(r=>[pdfTxt(r.name),pdfTxt(r.code),r.qty+' '+pdfTxt(r.unit),r.noCost?'-':pdfRM(r.cost),pdfRM(r.value)]),
+      foot:[['Total','','','',pdfRM(total)]],footStyles:{fillColor:[244,247,252],textColor:[11,31,58],fontStyle:'bold'},columnStyles:{3:{halign:'right'},4:{halign:'right'}}});
+    pdfFinish(doc,'SpareTrack_Stock_Valuation');
+  },
+  pm(){
+    const days=typeof pmDays==='function'?pmDays():30, pct=typeof pmPct==='function'?pmPct():85, today=lifeToday();
+    const rows=computePm(typeof transactions!=='undefined'?transactions:[],today,pct).filter(r=>r.predictable&&r.daysTo<=days).sort((a,b)=>a.pmDate-b.pmDate);
+    const doc=pdfDoc('PM Schedule','Overdue + next '+days+' days · PM at '+pct+'% of usual life');
+    pdfTable(doc,{startY:46,head:[['PM date','When','Part','Code','Machine','Qty','Stock','Done (sign / date)']],
+      body:rows.length?rows.map(r=>[lifeFmt(r.pmDate),r.daysTo<0?(-r.daysTo)+' d late':r.daysTo===0?'today':'in '+r.daysTo+' d',pdfTxt(r.partName),pdfTxt(r.code),pdfTxt(r.machine),r.need,r.stock==null?'-':r.stock,'']):[['No PM jobs in this period','','','','','','','']],
+      columnStyles:{5:{halign:'right'},6:{halign:'right'},7:{cellWidth:32}},
+      didParseCell:d=>{ if(d.section==='body'&&d.column.index===1&&/late/.test(String(d.cell.raw))){ d.cell.styles.textColor=[185,28,28]; d.cell.styles.fontStyle='bold'; } }});
+    pdfFinish(doc,'SpareTrack_PM_Schedule');
+  },
+  budget(){
+    const rows=computeBudget(typeof transactions!=='undefined'?transactions:[],lifeToday(),10);
+    const sum=k=>rows.reduce((a,r)=>a+r[k],0), total=sum('yearCost');
+    const doc=pdfDoc('Spare Part Budget','Next 12 months · +10% contingency');
+    let y=pdfTiles(doc,46,[['Yearly budget',pdfRM(total),'incl. +10% contingency'],['Per month',pdfRM(total/12),'average'],['To buy',pdfRM(sum('buyCost')),'after stock on hand'],['Parts',String(rows.length),'used in the last year']]);
+    const g={}; rows.forEach(r=>{ const k=r.cat||'(no category)'; g[k]=(g[k]||0)+r.yearCost; });
+    y=pdfSection(doc,y,'By category');
+    y=pdfTable(doc,{startY:y,head:[['Category','Yearly cost','Share']],body:Object.entries(g).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[pdfTxt(k),pdfRM(v),total?Math.round(v/total*100)+'%':'']),columnStyles:{1:{halign:'right'},2:{halign:'right'}}})+8;
+    y=pdfSection(doc,y,'By part');
+    pdfTable(doc,{startY:y,head:[['Part','Code','Use / year','Plan qty','Unit cost','Yearly cost','Stock','To buy']],
+      body:rows.map(r=>[pdfTxt(r.name),pdfTxt(r.code),r.perYear,r.qty,r.noCost?'-':pdfRM(r.cost),pdfRM(r.yearCost),r.stock,r.buy]),
+      foot:[['Total','','','','',pdfRM(total),'','']],footStyles:{fillColor:[244,247,252],textColor:[11,31,58],fontStyle:'bold'},
+      columnStyles:{2:{halign:'right'},3:{halign:'right'},4:{halign:'right'},5:{halign:'right'},6:{halign:'right'},7:{halign:'right'}}});
+    pdfFinish(doc,'SpareTrack_Budget');
+  },
+};
+document.getElementById('m-pdf').addEventListener('click',e=>{if(e.target===document.getElementById('m-pdf'))closeM('m-pdf');});
+(function(){
+  const rpt=document.getElementById('rpt'); if(!rpt||document.getElementById('pdf-open')) return;
+  const b=document.createElement('button'); b.id='pdf-open'; b.className='life-open-btn'; b.onclick=openPdf;
+  b.innerHTML='<span style="font-size:22px">🖨</span><span><b style="font-size:14px">PDF Reports</b><br><span style="font-size:12px;color:var(--text2)">Inventory · reorder list · valuation · PM schedule · budget</span></span>';
+  const v=document.getElementById('val-open');
+  v?rpt.insertBefore(b,v):rpt.appendChild(b);
+})();
+</script>

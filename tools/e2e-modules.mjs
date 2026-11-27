@@ -75,6 +75,29 @@ try {
   check('Valuation Excel downloads', /Stock_Valuation/.test((await dl).suggestedFilename()));
   await p.evaluate(() => closeM('m-val'));
   check('Reports has a Stock Valuation button', await p.evaluate(() => !!document.getElementById('val-open')));
+
+  // ── 2. PDF reports ──
+  await p.evaluate(() => openPdf());
+  await p.fill('#pdf-company', 'ABC Sdn Bhd');
+  const pdfText = async kind => {
+    const d = p.waitForEvent('download', { timeout: 30000 });
+    await p.evaluate(k => pdfReport(k), kind);
+    const f = '.e2e-' + kind + '.pdf'; await (await d).saveAs(f);
+    const txt = execSync('pdftotext -layout ' + f + ' -').toString(); if (process.env.KEEP_PDF) execSync('cp ' + f + ' ' + process.env.KEEP_PDF); execSync('rm -f ' + f);
+    return txt;
+  };
+  let txt = await pdfText('inventory');
+  check('PDF inventory: header, every part, status, page numbers', /ABC Sdn Bhd/.test(txt) && /Inventory List/.test(txt) && /SEALING HEAD/.test(txt) && /LOW STOCK|Low Stock/.test(txt) && /Page 1 of 1/.test(txt));
+  txt = await pdfText('reorder');
+  check('PDF reorder list: low + near parts, order qty, signature lines', /Reorder List/.test(txt) && /ACTUATOR/.test(txt) && /SEALING HEAD/.test(txt) && /Prepared by/.test(txt) && /Approved by/.test(txt) && !/BUSSMAN 80FE/.test(txt));
+  txt = await pdfText('valuation');
+  check('PDF valuation: total RM 1,294.00, dead stock section', /Stock Valuation/.test(txt) && /RM 1,294\.00/.test(txt) && /Dead stock/.test(txt));
+  txt = await pdfText('pm');
+  check('PDF PM schedule (empty period handled)', /PM Schedule/.test(txt) && /(No PM jobs|PM date)/.test(txt));
+  txt = await pdfText('budget');
+  check('PDF budget', /Spare Part Budget/.test(txt) && /Yearly budget/i.test(txt));
+  check('Company name remembered on this device', await p.evaluate(() => pdfCompany()) === 'ABC Sdn Bhd');
+  await p.evaluate(() => closeM('m-pdf'));
 } catch (e) { console.error('E2E error:', e); results.push(false); }
 await browser.close();
 try { process.kill(-server.pid); } catch (e) {}
