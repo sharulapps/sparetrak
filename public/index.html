@@ -5069,6 +5069,11 @@ body{ background:#F4F7FC!important; color:var(--text) }
 .app-wrap .sec-label{ color:var(--text3); font-weight:700 }
 .app-wrap .exp-btn, .life-open-btn{ background:#fff; border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow-sm) }
 .app-wrap .txn-item, .app-wrap .alert-card{ background:#fff; border:1px solid var(--border); border-radius:12px }
+/* Transaction rows: inner padding so the qty is not stuck to the edge; qty as a tinted pill */
+.app-wrap .txn-item{ padding:12px 16px; margin-bottom:8px; gap:14px }
+.app-wrap .txn-item .txn-qty{ flex-shrink:0; min-width:44px; text-align:center; padding:6px 12px; border-radius:999px; font-size:13.5px; font-variant-numeric:tabular-nums; background:color-mix(in srgb, currentColor 12%, transparent) }
+.app-wrap .txn-item .txn-meta{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+@media(max-width:600px){ .app-wrap .txn-item{ padding:11px 12px; gap:10px } .app-wrap .txn-item .txn-meta{ white-space:normal } }
 /* modals: white, royal blue accents */
 .overlay{ background:rgba(11,31,58,.45)!important }
 .sheet::after{ background:linear-gradient(90deg,transparent,var(--blue),transparent)!important; opacity:.6 }
