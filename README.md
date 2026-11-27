@@ -173,6 +173,7 @@ Menu → **Suppliers**. One record per supplier: contact person, phone, email, l
 - Call / WhatsApp / Email buttons; Malaysian numbers starting with 0 become 60… for WhatsApp.
 - Renaming a supplier offers to change the name on its parts. Deleting a supplier keeps the name on parts.
 - The part form suggests supplier names. Export Excel lists every supplier with its figures.
+- **Excel template** → fill in → **Import Excel**. The template lists current suppliers plus the names on parts (sheet *Suppliers*), a *Parts by supplier* reference sheet and *Instructions*. Import matches by name: filled cells update, empty cells keep the current value, new names are added, nothing is deleted. Phone is a text column; a Malaysian number that lost its leading 0 gets it back.
 - Admin, manager, engineer and purchasing can add / edit / delete; everyone else can view.
 
 Data: `tenants/{tid}/suppliers/{id}` (rules: read members; write admin/manager/engineer/purchasing; name required). **Re-publish firestore.rules after this change.**

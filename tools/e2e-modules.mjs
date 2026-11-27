@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import { spawn, execSync } from 'node:child_process';
 import { readFileSync, mkdirSync, existsSync } from 'node:fs';
 import admin from 'firebase-admin';
+import XLSX from 'xlsx';
 
 mkdirSync('screenshots', { recursive: true });
 execSync('node seed.mjs', { stdio: 'ignore' });
@@ -135,6 +136,33 @@ try {
   await p.click('#m-sup >> text=Delete supplier');
   await p.waitForFunction(() => document.querySelectorAll('#sup-body .sup-card').length === 2, null, { timeout: 15000 });
   check('Delete supplier keeps the part supplier name', (await db.collection('tenants/mnsb/suppliers').get()).size === 2 && (await P('MAINTP00030').ref.get()).data().supplier === 'FUTURE CONTROL SUPPLIES SDN BHD');
+  // Excel template → fill in → import
+  const dlt = p.waitForEvent('download');
+  await p.click('#m-sup >> text=Excel template');
+  const tf = '.e2e-sup-template.xlsx'; await (await dlt).saveAs(tf);
+  const twb = XLSX.read(readFileSync(tf), { cellNF: true });
+  const trows = XLSX.utils.sheet_to_json(twb.Sheets.Suppliers, { header: 1, blankrows: false, defval: '' }).filter(r => r.some(c => c !== ''));
+  check('Template: Suppliers / Parts by supplier / Instructions sheets, prefilled with current + part supplier names',
+    twb.SheetNames.join() === 'Suppliers,Parts by supplier,Instructions' && trows[0][0] === 'Supplier name *' && trows.length === 4 && twb.Sheets.Suppliers.C3.z === '@'
+    && trows.some(r => r[0] === 'FUTURE CONTROL SUPPLIES SDN BHD') && trows.some(r => r[0] === 'DPSTAR Thermo Electric (M) Sdn Bhd' && r[2] === '012-345 6789'), JSON.stringify(trows));
+  for (const r of trows.slice(1)) {
+    if (/SHENYANG/.test(r[0])) { r[2] = '+86 24 1234 5678'; r[5] = '30 days'; }
+    if (/FUTURE/.test(r[0])) r[1] = 'Mr Tan';
+    if (/DPSTAR/.test(r[0])) r[3] = '';   // empty cell keeps the current email
+  }
+  trows.push(['new hydraulic co.', 'Siti', 198887777]);   // Excel dropped the leading 0
+  twb.Sheets.Suppliers = XLSX.utils.aoa_to_sheet(trows);
+  XLSX.writeFile(twb, tf);
+  await p.setInputFiles('#sup-file', tf);
+  await p.waitForFunction(() => document.querySelectorAll('#sup-body .sup-card').length === 4, null, { timeout: 15000 });
+  execSync('rm -f ' + tf);
+  const sups = Object.fromEntries((await db.collection('tenants/mnsb/suppliers').get()).docs.map(d => [d.data().name, d.data()]));
+  check('Import: updates filled cells, keeps empty ones, adds new names, no duplicates',
+    Object.keys(sups).length === 4 && sups['SHENYANG WIN-WIN WATERJET CO., LTD'].phone === '+86 24 1234 5678' && sups['SHENYANG WIN-WIN WATERJET CO., LTD'].terms === '30 days'
+    && sups['FUTURE CONTROL SUPPLIES SDN BHD'].contact === 'Mr Tan' && sups['DPSTAR Thermo Electric (M) Sdn Bhd'].email === 'sales@dpstar.test' && sups['new hydraulic co.'].phone === '0198887777', JSON.stringify(Object.keys(sups)));
+  await p.setInputFiles('#sup-file', { name: 'again.xlsx', mimeType: 'application/octet-stream', buffer: XLSX.write(twb, { type: 'buffer', bookType: 'xlsx' }) });
+  await p.waitForTimeout(1200);
+  check('Importing the same file again changes nothing', (await db.collection('tenants/mnsb/suppliers').get()).size === 4);
   await p.evaluate(() => closeM('m-sup'));
   const tech = await open('tech@mnsb.test');
   await tech.evaluate(() => openSuppliers());
@@ -158,7 +186,7 @@ try {
   const ed = logs.find(l => l.action === 'Part edited' && (l.changes || []).some(c => c.f === 'min'));
   check('Part edit logged with old → new (Min 2 → 4)', ed && ed.changes.some(c => c.f === 'min' && c.from === '2' && c.to === '4'), JSON.stringify(ed && ed.changes));
   check('Stock OUT alone does not add a "Part edited" stock entry', !logs.some(l => l.action === 'Part edited' && (l.changes || []).some(c => c.f === 'qty')));
-  check('Supplier add / rename / delete logged', logs.filter(l => l.action === 'Supplier added').length === 3 && logs.some(l => l.action === 'Supplier edited' && l.changes.some(c => c.f === 'name')) && logs.some(l => l.action === 'Supplier deleted'));
+  check('Supplier add / rename / delete logged', logs.filter(l => l.action === 'Supplier added').length === 5 && logs.some(l => l.action === 'Supplier edited' && l.changes.some(c => c.f === 'name')) && logs.some(l => l.action === 'Supplier deleted'));
   const fd = (await fuse.ref.get()).data();
   check('Part keeps "last updated by" (Aiman, now)', fd.lastBy === 'Aiman (Manager)' && Date.now() - fd.lastAt < 60000);
   await p.evaluate(id => openEdit(id), fuse.id);

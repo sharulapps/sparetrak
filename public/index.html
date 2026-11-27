@@ -5647,6 +5647,7 @@ document.getElementById('m-pdf').addEventListener('click',e=>{if(e.target===docu
 </div>
 </div>
 <datalist id="supplier-dl"></datalist>
+<input type="file" id="sup-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="supImport(this.files[0]);this.value=''">
 <script>
 let suppliers=null, supLoading=null;
 const SUP_EDIT_ROLES=['admin','manager','engineer','purchasing'];
@@ -5696,9 +5697,11 @@ function supList(){
       <input id="sup-q" placeholder="Search supplier, contact, phone" value="${supEsc(document.getElementById('sup-q')?.value||'')}" oninput="supList();document.getElementById('sup-q').focus();this.setSelectionRange(this.value.length,this.value.length)">
       ${ed?`<button class="act" onclick="supForm()" style="justify-content:center;padding:9px 12px">+ Add supplier</button>`:''}
       ${ed&&missing.length?`<button class="act" onclick="supImportFromParts()" style="justify-content:center;padding:9px 12px">Add ${missing.length} from parts</button>`:''}
+      ${ed?`<button class="act" onclick="supTemplate()" style="justify-content:center;padding:9px 12px">Excel template</button>
+      <button class="act" onclick="document.getElementById('sup-file').click()" style="justify-content:center;padding:9px 12px">Import Excel</button>`:''}
       <button class="act" onclick="exportSuppliers()" style="justify-content:center;padding:9px 12px">Export Excel</button>
     </div>
-    ${!(suppliers||[]).length?`<div class="empty" style="padding:20px 0">No suppliers yet.${ed&&missing.length?' Tap "Add '+missing.length+' from parts" to start with the supplier names already on your parts.':''}</div>`:''}
+    ${!(suppliers||[]).length?`<div class="empty" style="padding:20px 0">No suppliers yet.${ed&&missing.length?' Tap "Add '+missing.length+' from parts" to start with the supplier names already on your parts,':''}${ed?' or download the Excel template, fill in contacts and Import Excel.':''}</div>`:''}
     ${list.map(s=>{ const st=supStats(s); return `<div class="sup-card" onclick="supDetail('${supEsc(s.id)}')">
       <div class="sup-top"><div style="min-width:0"><div class="sup-name">${supEsc(s.name)}</div>
         <div class="sup-sub">${[s.contact,s.phone,s.email].filter(Boolean).map(supEsc).join(' · ')||'<i>no contact details</i>'}</div></div>
@@ -5781,6 +5784,90 @@ async function supDelete(id){
   try{ const {deleteDoc,doc,db}=window._fs; await deleteDoc(doc(db,'suppliers',id)); }
   catch(e){ toast('Could not delete: '+(e.code||e.message)); return; }
   await loadSuppliers(true); supList(); toast('Supplier deleted');
+}
+// Excel template: one row per supplier (existing records + names already on parts), ready to fill in
+const SUP_XL=[['name','Supplier name *'],['contact','Contact person'],['phone','Phone'],['email','Email'],['leadTime','Lead time'],['terms','Payment terms'],['address','Address'],['notes','Notes']];
+async function supTemplate(){
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
+  try{ await loadSuppliers(); }catch(e){}
+  const rows=(suppliers||[]).map(s=>SUP_XL.map(([k])=>s[k]||'')).concat(supMissingNames().map(n=>[n,'','','','','','','']));
+  rows.sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet([SUP_XL.map(x=>x[1]),...rows]);
+  ws['!cols']=[{wch:38},{wch:20},{wch:16},{wch:28},{wch:12},{wch:14},{wch:40},{wch:30}];
+  ws['!autofilter']={ref:'A1:H'+(rows.length+1)};
+  // Phone as text, so Excel keeps the leading 0
+  for(let i=2;i<=rows.length+200;i++){ const c=ws['C'+i]||(ws['C'+i]={t:'s',v:''}); c.t='s'; c.v=String(c.v==null?'':c.v); c.z='@'; }
+  ws['!ref']='A1:H'+(rows.length+200);
+  XLSX.utils.book_append_sheet(wb,ws,'Suppliers');
+  const pr=(typeof parts!=='undefined'?parts:[]).filter(p=>p.supplier).sort((a,b)=>String(a.supplier).localeCompare(String(b.supplier))||String(a.name).localeCompare(String(b.name))).map(p=>[p.supplier,p.name,p.code||'',p.qty,p.unit||'']);
+  const wp=XLSX.utils.aoa_to_sheet([['Supplier (as on part)','Part','Code','Stock','Unit'],...pr]);
+  wp['!cols']=[{wch:38},{wch:44},{wch:16},{wch:8},{wch:8}];
+  XLSX.utils.book_append_sheet(wb,wp,'Parts by supplier');
+  const wi=XLSX.utils.aoa_to_sheet([['How to use this template'],[''],
+    ['1. Fill in the "Suppliers" sheet: one row per supplier. Only "Supplier name" is required.'],
+    ['2. Rows already listed are your current suppliers and the supplier names found on your parts.'],
+    ['3. Keep the supplier name the same as on the parts so they stay linked (case and dots do not matter).'],
+    ['4. Add new suppliers as new rows. Do not rename the column headers.'],
+    ['5. In SpareTrack: Suppliers > Import Excel and choose this file.'],
+    ['   - Existing suppliers are updated with the cells you filled in. Empty cells keep the current value.'],
+    ['   - New names are added as new suppliers. Nothing is deleted.'],
+    [''],['"Parts by supplier" is for reference only and is not imported.']]);
+  wi['!cols']=[{wch:100}];
+  XLSX.utils.book_append_sheet(wb,wi,'Instructions');
+  XLSX.writeFile(wb,'SpareTrack_Supplier_Template_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Template downloaded ✓ — fill it in, then Import Excel');
+}
+// Map a header cell to a field ("Supplier name *", "Supplier", "Nama pembekal", "Tel" ...)
+function supCol(h){
+  h=supKey(h);
+  if(/^(supplier|vendor|company|nama|pembekal)/.test(h)||h==='name') return 'name';
+  if(/contact|person|pic|wakil/.test(h)) return 'contact';
+  if(/phone|tel|mobile|hp|no telefon/.test(h)) return 'phone';
+  if(/mail/.test(h)) return 'email';
+  if(/lead/.test(h)) return 'leadTime';
+  if(/term|payment|bayaran/.test(h)) return 'terms';
+  if(/address|alamat/.test(h)) return 'address';
+  if(/note|remark|catatan/.test(h)) return 'notes';
+  return null;
+}
+function supParseSheet(wb){
+  const name=wb.SheetNames.find(n=>/supplier/i.test(n))||wb.SheetNames[0];
+  const aoa=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,defval:'',raw:false});
+  const hi=aoa.findIndex(r=>r.some(c=>supCol(c)==='name')); if(hi<0) return {err:'No "Supplier name" column found in sheet "'+name+'".'};
+  const map=aoa[hi].map(supCol), out=new Map();
+  for(const r of aoa.slice(hi+1)){
+    const o={}; map.forEach((k,i)=>{ if(k&&!(k in o)) o[k]=String(r[i]==null?'':r[i]).trim().slice(0,200); });
+    if(!o.name) continue;
+    // Excel turns 0123456789 into 123456789: put the 0 back for Malaysian numbers
+    if(o.phone&&/^1\d{7,9}$/.test(o.phone)) o.phone='0'+o.phone;
+    out.set(supKey(o.name),o);  // the same name twice: the last row wins
+  }
+  return {rows:[...out.values()]};
+}
+async function supImport(file){
+  if(!file) return;
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
+  let res;
+  try{ res=supParseSheet(XLSX.read(await file.arrayBuffer(),{type:'array'})); }catch(e){ toast('Could not read the file: '+e.message); return; }
+  if(res.err){ toast(res.err); return; }
+  try{ await loadSuppliers(true); }catch(e){ toast('Could not load suppliers: '+(e.code||e.message)); return; }
+  const byKey=new Map((suppliers||[]).map(s=>[supKey(s.name),s]));
+  const adds=[], ups=[];
+  for(const r of res.rows){
+    const cur=byKey.get(supKey(r.name));
+    if(!cur){ adds.push(r); continue; }
+    const patch={}; SUP_XL.forEach(([k])=>{ if(k!=='name'&&r[k]&&r[k]!==(cur[k]||'')) patch[k]=r[k]; });
+    if(Object.keys(patch).length) ups.push({cur,patch});
+  }
+  if(!adds.length&&!ups.length){ toast('Nothing to import — the file matches your supplier list'); return; }
+  if(!confirm('Import suppliers from "'+file.name+'"?\n\n'+adds.length+' new supplier(s)\n'+ups.length+' supplier(s) updated\n'+(res.rows.length-adds.length-ups.length)+' unchanged\n\nEmpty cells keep the current value. Nothing is deleted.')) return;
+  const {collection,addDoc,setDoc,doc,db}=window._fs, who=currentUser?currentUser.uid:'';
+  let n=0, fail=null;
+  for(const r of adds){ try{ await addDoc(collection(db,'suppliers'),{...Object.fromEntries(SUP_XL.map(([k])=>[k,r[k]||''])),createdAt:Date.now(),createdBy:who}); n++; }catch(e){ fail=e; break; } }
+  if(!fail) for(const u of ups){ try{ await setDoc(doc(db,'suppliers',u.cur.id),{...u.patch,updatedAt:Date.now(),updatedBy:who},{merge:true}); n++; }catch(e){ fail=e; break; } }
+  await loadSuppliers(true); supList();
+  toast(fail?'Imported '+n+', then stopped: '+(fail.code||fail.message):'Suppliers imported ✓ ('+adds.length+' new, '+ups.length+' updated)');
 }
 function exportSuppliers(){
   if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
