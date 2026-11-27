@@ -53,7 +53,7 @@ try {
   await p.waitForFunction(() => document.getElementById('main-app').style.display === 'flex' && parts.length > 0, null, { timeout: 20000 });
   await p.waitForTimeout(800);
 
-  check('PM in the menu, before Help', await p.evaluate(() => { const b = [...document.querySelectorAll('.nav-btn')]; return b.indexOf(document.getElementById('nav-pm')) === b.indexOf(document.getElementById('nav-help')) - 1; }));
+  check('PM in the menu, before Help', await p.evaluate(() => { const b = [...document.querySelectorAll('.nav-btn')]; return b.indexOf(document.getElementById('nav-pm')) >= 0 && b.indexOf(document.getElementById('nav-pm')) < b.indexOf(document.getElementById('nav-help')); }));
   await p.click('#nav-pm');
   await p.waitForFunction(() => document.querySelectorAll('#pm-list .pm-item').length > 0, null, { timeout: 15000 });
   // Default view: next 7 days (+ overdue)

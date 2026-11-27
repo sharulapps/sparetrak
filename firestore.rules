@@ -206,6 +206,18 @@ service cloud.firestore {
         allow delete: if hasRole(tid, ['admin','manager','engineer','purchasing']);
       }
 
+      // Audit trail: anyone in the company adds entries in their own name;
+      // nobody can edit or delete them. Admin and manager read them.
+      match /auditLog/{id} {
+        allow read: if hasRole(tid, ['admin','manager']);
+        allow create: if isMember(tid)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.ts == request.time
+          && request.resource.data.at is number
+          && request.resource.data.action is string;
+        allow update, delete: if false;
+      }
+
       // deletions/{col}~{docId}: tells other devices to drop a deleted doc.
       // Only written together with the real delete (the doc must be gone after the batch).
       match /deletions/{key} {

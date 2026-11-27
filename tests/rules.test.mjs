@@ -312,3 +312,18 @@ test('suppliers: members read, managers write, technicians cannot write', async 
   await assertFails(setDoc(doc(as('acme-admin'), 'tenants/mnsb/suppliers/s4'), { name: 'hack' }));
   await assertSucceeds(deleteDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/suppliers/s1')));
 });
+
+// ── Audit trail ─────────────────────────────────
+test('audit log: written in own name only, cannot be edited or deleted, read by admin/manager', async () => {
+  const E = (uid, o = {}) => ({ uid, user: uid, role: 'technician', action: 'Stock OUT', type: 'stock', at: Date.now(), ts: serverTimestamp(), ...o });
+  await assertSucceeds(setDoc(doc(as('mnsb-tech'), 'tenants/mnsb/auditLog/a1'), E('mnsb-tech')));
+  await assertFails(setDoc(doc(as('mnsb-tech'), 'tenants/mnsb/auditLog/a2'), E('mnsb-admin')));
+  await assertFails(setDoc(doc(as('mnsb-tech'), 'tenants/mnsb/auditLog/a3'), E('mnsb-tech', { ts: 1 })));
+  await assertFails(setDoc(doc(as('acme-admin'), 'tenants/mnsb/auditLog/a4'), E('acme-admin')));
+  await assertFails(getDoc(doc(as('mnsb-tech'), 'tenants/mnsb/auditLog/a1')));
+  await assertSucceeds(getDoc(doc(as('mnsb-mgr'), 'tenants/mnsb/auditLog/a1')));
+  await assertFails(getDoc(doc(as('acme-admin'), 'tenants/mnsb/auditLog/a1')));
+  await assertFails(updateDoc(doc(as('mnsb-admin'), 'tenants/mnsb/auditLog/a1'), { action: 'nothing' }));
+  await assertFails(deleteDoc(doc(as('mnsb-admin'), 'tenants/mnsb/auditLog/a1')));
+  await assertFails(setDoc(doc(as('mnsb-tech'), 'tenants/mnsb/auditLog/a1'), E('mnsb-tech', { action: 'overwrite' })));
+});

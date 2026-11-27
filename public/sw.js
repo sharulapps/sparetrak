@@ -1,4 +1,4 @@
-const CACHE = 'sparetrak-v21';
+const CACHE = 'sparetrak-v22';
 const URLS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', e => {

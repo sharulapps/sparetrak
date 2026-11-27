@@ -140,6 +140,42 @@ try {
   await tech.evaluate(() => openSuppliers());
   await tech.waitForSelector('#m-sup .sup-card');
   check('Technician can view suppliers but has no Add / Edit / Delete', await tech.evaluate(() => !/\+ Add supplier/.test(document.getElementById('sup-body').textContent) && (document.querySelector('#m-sup .sup-card').click(), !/Delete supplier|✎ Edit/.test(document.getElementById('sup-body').textContent))));
+
+  // ── 4. Audit trail + last updated ──
+  check('Audit Trail menu hidden for technician', await tech.evaluate(() => getComputedStyle(document.getElementById('nav-aud')).display === 'none'));
+  const fuse = P('MAINTE00311');
+  await p.evaluate(id => openTxn(id, 'out'), fuse.id);
+  await p.fill('#t-qty', '2'); if (await p.$('#t-machine')) await p.fill('#t-machine', 'PRESS 7');
+  await p.evaluate(() => saveTxn());
+  await p.waitForTimeout(1200);
+  await p.evaluate(id => openEdit(id), fuse.id);
+  await p.fill('#f-min', '4');
+  await p.evaluate(() => savePart());
+  await p.waitForTimeout(1500);
+  const logs = (await db.collection('tenants/mnsb/auditLog').get()).docs.map(d => d.data());
+  const out = logs.find(l => l.action === 'Stock OUT');
+  check('Stock OUT logged: who, part, qty, machine, server time', out && out.user === 'Aiman (Manager)' && out.role === 'manager' && /80FE FUSE/.test(out.target) && /^2 pcs · Machine: PRESS 7$/.test(out.details) && out.code === 'MAINTE00311' && /PRESS 7/.test(out.details) && out.ts && out.uid, JSON.stringify(out || {}).slice(0, 200));
+  const ed = logs.find(l => l.action === 'Part edited' && (l.changes || []).some(c => c.f === 'min'));
+  check('Part edit logged with old → new (Min 2 → 4)', ed && ed.changes.some(c => c.f === 'min' && c.from === '2' && c.to === '4'), JSON.stringify(ed && ed.changes));
+  check('Stock OUT alone does not add a "Part edited" stock entry', !logs.some(l => l.action === 'Part edited' && (l.changes || []).some(c => c.f === 'qty')));
+  check('Supplier add / rename / delete logged', logs.filter(l => l.action === 'Supplier added').length === 3 && logs.some(l => l.action === 'Supplier edited' && l.changes.some(c => c.f === 'name')) && logs.some(l => l.action === 'Supplier deleted'));
+  const fd = (await fuse.ref.get()).data();
+  check('Part keeps "last updated by" (Aiman, now)', fd.lastBy === 'Aiman (Manager)' && Date.now() - fd.lastAt < 60000);
+  await p.evaluate(id => openEdit(id), fuse.id);
+  check('Edit Part shows "Last updated … by Aiman"', /Last updated .* by Aiman \(Manager\)/.test(await p.textContent('#f-lastupd')));
+  await p.click('#f-lastupd >> text=View history');
+  await p.waitForSelector('#m-aud.open table', { timeout: 15000 });
+  const at = (await p.textContent('#aud-body')).replace(/\s+/g, ' ');
+  check('View history opens the audit trail for that part', /Stock OUT/.test(at) && /Part edited/.test(at) && !/Supplier added/.test(at), at.slice(0, 200));
+  await p.fill('#aud-q', ''); await p.selectOption('#aud-type', 'supplier');
+  check('Filter by type (Suppliers)', await p.evaluate(() => [...document.querySelectorAll('#aud-body tr')].slice(1).every(r => /Supplier/.test(r.textContent))) && await p.evaluate(() => document.querySelectorAll('#aud-body tr').length > 3));
+  await p.selectOption('#aud-type', '');
+  await p.screenshot({ path: 'screenshots/84-audit-trail.png' });
+  const dl3 = p.waitForEvent('download');
+  await p.click('#m-aud >> text=Export Excel');
+  check('Audit trail Excel downloads', /Audit_Trail/.test((await dl3).suggestedFilename()));
+  check('Technician cannot read the audit trail', await tech.evaluate(async () => { try { const F = window._fs; await F.getDocs(F.collection(F.db, 'auditLog')); return false; } catch (e) { return /permission/i.test(e.code || e.message); } }));
+  check('Audit entries cannot be deleted', await p.evaluate(async () => { const F = window._fs; const s = await F.getDocs(F.collection(F.db, 'auditLog')); try { await F.deleteDoc(s.docs[0].ref); return false; } catch (e) { return true; } }));
 } catch (e) { console.error('E2E error:', e); results.push(false); }
 await browser.close();
 try { process.kill(-server.pid); } catch (e) {}

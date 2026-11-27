@@ -99,6 +99,12 @@ try {
   await adm.click('#m-sup >> text=Save supplier');
   await adm.waitForSelector('#m-sup a[href="https://wa.me/60123456789"]', { timeout: 15000 });
   check('Old app: supplier saved to suppliers/ with WhatsApp link', (await db.collection('suppliers').get()).docs.some(d => d.data().name === 'DPSTAR Thermo Electric Sdn Bhd'));
+  await adm.waitForTimeout(800);
+  const v1log = (await db.collection('auditLog').get()).docs.map(d => d.data());
+  check('Old app: audit trail records disable / enable and the new supplier', v1log.some(l => l.action === 'User disabled' && l.target === 'Riezhan' && l.user === 'Admin') && v1log.some(l => l.action === 'User enabled') && v1log.some(l => l.action === 'Supplier added'), JSON.stringify(v1log.map(l => l.action)));
+  await adm.evaluate(() => { closeM('m-sup'); openAudit(); });
+  await adm.waitForSelector('#m-aud.open table', { timeout: 15000 });
+  check('Old app: Audit Trail page lists the changes', /User disabled/.test(await adm.textContent('#aud-body')));
 } catch (e) { console.error('E2E error:', e); results.push(false); }
 await browser.close();
 try { process.kill(-server.pid); } catch (e) {}

@@ -5806,3 +5806,238 @@ document.getElementById('m-sup').addEventListener('click',e=>{if(e.target===docu
   if(f){ f.setAttribute('list','supplier-dl'); f.setAttribute('autocomplete','off'); f.addEventListener('focus',()=>{ fillSupplierList(); if(!suppliers&&window._fs) loadSuppliers().catch(()=>{}); }); }
 })();
 </script>
+
+<!-- ═══ AUDIT TRAIL: who changed what, and "Last updated" on each part ═══ -->
+<style>
+#m-aud{z-index:1050}
+#m-aud .sheet{max-width:1100px;max-height:94vh}
+#m-aud .aud-ctl{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+#m-aud .aud-ctl input,#m-aud .aud-ctl select{min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px}
+#m-aud .aud-ctl input{flex:1 1 180px}
+#m-aud .aud-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px}
+#m-aud table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px}
+#m-aud th{text-align:left;padding:8px 10px;background:var(--bg2);color:var(--text2);font-weight:700;position:sticky;top:0}
+#m-aud td{padding:8px 10px;border-top:1px solid var(--border);vertical-align:top}
+#m-aud td.t{white-space:nowrap;color:var(--text2)}
+#m-aud .aud-act{display:inline-block;padding:2px 8px;border-radius:7px;font-size:11.5px;font-weight:700;white-space:nowrap;background:var(--bg2);color:var(--text2)}
+#m-aud .aud-act.add{background:#ECFDF5;color:#047857} #m-aud .aud-act.del{background:#FEF2F2;color:#B91C1C} #m-aud .aud-act.stk{background:#EFF6FF;color:#1D4ED8} #m-aud .aud-act.usr{background:#F5F3FF;color:#6D28D9}
+#m-aud .aud-ch{color:var(--text2);font-size:12px} #m-aud .aud-ch s{color:var(--text3)} #m-aud .aud-ch b{color:var(--text)}
+#m-aud .aud-note{font-size:12px;color:var(--text3);margin-top:8px}
+#f-lastupd{font-size:12px;color:var(--text2);margin:2px 0 10px;padding:8px 10px;background:var(--bg2);border-radius:9px}
+#f-lastupd a{color:var(--blue);font-weight:600;text-decoration:none;margin-left:6px}
+</style>
+<div class="overlay" id="m-aud">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span>Audit Trail</span>
+    <button class="close" aria-label="Close" onclick="closeM('m-aud')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div class="aud-ctl">
+    <input id="aud-q" placeholder="Search user, part, code, details" oninput="audRender()">
+    <select id="aud-type" onchange="audRender()">
+      <option value="">All changes</option><option value="part">Parts</option><option value="stock">Stock IN / OUT</option><option value="request">Requests</option><option value="user">Users</option><option value="supplier">Suppliers</option><option value="settings">Settings</option>
+    </select>
+    <select id="aud-days" onchange="openAudit()">
+      <option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last 12 months</option>
+    </select>
+    <button class="act" onclick="exportAudit()" style="justify-content:center;padding:8px 12px">Export Excel</button>
+  </div>
+  <div id="aud-body"></div>
+</div>
+</div>
+<script>
+const AUD_VIEW_ROLES=['admin','manager'];
+const AUD_COLS={parts:'part',transactions:'stock',approvals:'request',members:'user',users:'user',suppliers:'supplier',tenants:'settings',settings:'settings'};
+const AUD_SKIP_KEY=/^(updatedAt|updatedBy|lastBy|lastByUid|lastAt|alert|notif|fcm|token|seen|lastLogin|lastSeen|statusAt|statusBy|createdAt|createdBy|img)/i;
+const AUD_LABEL={name:'Name',code:'Code',cat:'Category',loc:'Location',qty:'Stock',min:'Min',max:'Max',unit:'Unit',supplier:'Supplier',leadtime:'Lead time',leadTime:'Lead time',cost:'Unit cost',role:'Role',status:'Status',email:'Email',phone:'Phone',contact:'Contact',terms:'Payment terms',address:'Address',notes:'Notes',plant:'Plant',dept:'Department'};
+let audCtx=null, audRows=[], audWarned=false;
+function audWho(){ const u=(typeof currentUser!=='undefined'&&currentUser)||{}; return {uid:u.uid||'',user:u.name||u.email||'',role:u.role||''}; }
+function audStr(v){ if(v==null||v==='') return ''; if(typeof v==='object'){ if(typeof v.toMillis==='function') return new Date(v.toMillis()).toLocaleString('en-GB'); return ''; } return String(v).slice(0,120); }
+function audPlain(v){ return v==null||typeof v!=='object'||Array.isArray(v); }
+// Fields that changed, with old -> new (sentinels such as increment() are left to the stock entry)
+function audDiff(oldDoc,data){
+  const out=[];
+  for(const k of Object.keys(data||{})){
+    if(AUD_SKIP_KEY.test(k)) continue;
+    const nv=data[k]; if(!audPlain(nv)) continue;
+    const ov=oldDoc?oldDoc[k]:undefined;
+    if(audStr(ov)===audStr(Array.isArray(nv)?nv.join(', '):nv)) continue;
+    out.push({f:k,from:audStr(Array.isArray(ov)?ov.join(', '):ov),to:audStr(Array.isArray(nv)?nv.join(', '):nv)});
+  }
+  return out.slice(0,20);
+}
+function audSeg(path){ const s=String(path||'').split('/'); return s.length%2===0?{col:s[s.length-2],id:s[s.length-1]}:{col:s[s.length-1],id:''}; }
+function audOld(col,id){
+  try{
+    if(col==='parts') return (typeof parts!=='undefined'?parts:[]).find(p=>String(p.id)===String(id));
+    if(col==='members'||col==='users') return (typeof allUsers!=='undefined'?allUsers:[]).find(u=>String(u.uid||u.id)===String(id));
+    if(col==='suppliers') return (typeof suppliers!=='undefined'&&suppliers?suppliers:[]).find(s=>s.id===id);
+  }catch(e){}
+  return null;
+}
+// Build the log entry for one write (before it happens, so the old values are known)
+function audEntry(path,kind,data){
+  const {col,id}=audSeg(path), type=AUD_COLS[col]; if(!type) return null;
+  const old=kind==='create'?null:audOld(col,id), d=data||{};
+  const e={type,col,docId:id,target:'',action:'',details:'',changes:[]};
+  const nm=(old&&(old.name||old.partName||old.email))||d.name||d.partName||d.email||'';
+  e.target=String(nm).slice(0,160);
+  // Part code and unit, so a part's history also finds its stock moves and requests
+  const pp=d.partId||(old&&old.partId)?(typeof parts!=='undefined'?parts:[]).find(x=>String(x.id)===String(d.partId||old.partId)):(col==='parts'?(old||d):null);
+  if(pp&&pp.code) e.code=String(pp.code);
+  const unit=d.unit||(pp&&pp.unit)||'', qn=v=>(v+' '+unit).trim();
+  if(type==='part'){
+    if(kind==='delete'){ e.action='Part deleted'; }
+    else if(!old){ e.action='Part added'; e.details=d.qty!=null?'Stock '+qn(d.qty):''; }
+    else{
+      e.changes=audDiff(old,d);
+      // Stock-only changes are logged by their transaction, except from the Edit Part form
+      if(!e.changes.length||(audCtx!=='edit'&&e.changes.every(c=>c.f==='qty'))) return null;
+      e.action='Part edited';
+    }
+  }else if(type==='stock'){
+    const t=String(d.type||(old&&old.type)||'').toUpperCase();
+    if(kind==='delete'){ e.action='Transaction deleted'; }
+    else if(kind==='create'){ e.action=t==='STOCKTAKE'||d.stocktake?'Stocktake':'Stock '+(t||'move'); e.details=[d.qty!=null?qn(d.qty):'',d.machine?'Machine: '+d.machine:'',d.note||d.remark||d.remarks||'',d.user&&d.user!==audWho().user?'for '+d.user:''].filter(Boolean).join(' · '); }
+    else{ e.changes=audDiff(null,d); if(!e.changes.length) return null; e.action='Transaction edited'; }
+  }else if(type==='request'){
+    if(kind==='delete'){ e.action='Request deleted'; }
+    else if(kind==='create'){ e.action='OUT request'; e.details=[d.qty!=null?qn(d.qty):'',d.machine?'Machine: '+d.machine:'',d.requestedBy?'by '+d.requestedBy:''].filter(Boolean).join(' · '); }
+    else if(d.status&&audPlain(d.status)){ e.action=d.status==='approved'?'Request approved':d.status==='rejected'?'Request rejected':'Request '+d.status; e.details=[d.rejectReason||d.reason||'',d.qty!=null?qn(d.qty):''].filter(Boolean).join(' · '); }
+    else return null;
+  }else if(type==='user'){
+    if(kind==='delete'){ e.action='User removed'; }
+    else if(!old&&kind!=='update'){ e.action='User added'; e.details=[d.email,d.role].filter(Boolean).join(' · '); }
+    else{
+      e.changes=audDiff(old,d); if(!e.changes.length) return null;
+      const st=e.changes.find(c=>c.f==='status');
+      e.action=st?(st.to==='disabled'?'User disabled':st.to==='active'?'User enabled':'User status'):e.changes.some(c=>c.f==='role')?'Role changed':'User edited';
+    }
+  }else if(type==='supplier'){
+    if(kind==='delete') e.action='Supplier deleted';
+    else if(!old) e.action='Supplier added';
+    else{ e.changes=audDiff(old,d); if(!e.changes.length) return null; e.action='Supplier edited'; }
+  }else if(type==='settings'){
+    if(col==='tenants'&&String(path).split('/').length!==2) return null;
+    e.changes=audDiff(null,d); if(!e.changes.length&&kind!=='delete') return null;
+    e.action='Settings changed'; e.target=''; e.changes=e.changes.map(c=>({f:c.f,from:'',to:c.to}));
+  }
+  return e;
+}
+function audIsPart(ref){ return audSeg(ref&&ref.path).col==='parts'&&String(ref.path).split('/').length%2===0; }
+function audStamp(ref,data){
+  if(!audIsPart(ref)||!data||typeof data!=='object') return data;
+  const w=audWho(); return {...data,lastBy:w.user,lastByUid:w.uid,lastAt:Date.now()};
+}
+function audWrite(orig,entries){
+  entries=entries.filter(Boolean); if(!entries.length||!orig) return;
+  const w=audWho(); if(!w.uid||w.uid==='local') return;
+  for(const e of entries){
+    const rec={...e,...w,at:Date.now()};
+    if(orig.serverTimestamp) rec.ts=orig.serverTimestamp();
+    Promise.resolve().then(()=>orig.addDoc(orig.collection(orig.db,'auditLog'),rec)).catch(err=>{ if(!audWarned){ audWarned=true; console.warn('Audit log not saved:',err&&(err.code||err.message)); } });
+  }
+}
+function audWrap(orig){
+  if(!orig||orig._audit) return orig;
+  const F=Object.assign({},orig,{_audit:true});
+  F.setDoc=async(ref,data,opts)=>{
+    const old=audOld(audSeg(ref.path).col,audSeg(ref.path).id);
+    const e=audEntry(ref.path,old?'update':'create',data), d=audStamp(ref,data);
+    const r=await (opts?orig.setDoc(ref,d,opts):orig.setDoc(ref,d)); audWrite(orig,[e]); return r;
+  };
+  if(orig.updateDoc) F.updateDoc=async(ref,data)=>{ const e=audEntry(ref.path,'update',data); const r=await orig.updateDoc(ref,audStamp(ref,data)); audWrite(orig,[e]); return r; };
+  F.addDoc=async(colRef,data)=>{
+    const fake={path:colRef.path+'/x'};
+    const e=audEntry(fake.path,'create',data);
+    const r=await orig.addDoc(colRef,audStamp(fake,data));
+    if(e) e.docId=r&&r.id||''; audWrite(orig,[e]); return r;
+  };
+  F.deleteDoc=async ref=>{ const e=audEntry(ref.path,'delete',{}); const r=await orig.deleteDoc(ref); audWrite(orig,[e]); return r; };
+  if(orig.writeBatch) F.writeBatch=db=>{
+    const b=orig.writeBatch(db), pend=[];
+    const w={
+      set(ref,data,opts){ const old=audOld(audSeg(ref.path).col,audSeg(ref.path).id); pend.push(audEntry(ref.path,old?'update':'create',data)); opts?b.set(ref,audStamp(ref,data),opts):b.set(ref,audStamp(ref,data)); return w; },
+      update(ref,data){ pend.push(audEntry(ref.path,'update',data)); b.update(ref,audStamp(ref,data)); return w; },
+      delete(ref){ pend.push(audEntry(ref.path,'delete',{})); b.delete(ref); return w; },
+      size:()=>b.size?b.size():pend.length,
+      async commit(){ const r=await b.commit(); audWrite(orig,pend); return r; }
+    };
+    return w;
+  };
+  return F;
+}
+// window._fs is created at sign-in: wrap it whenever it is set
+(function(){
+  let cur=window._fs?audWrap(window._fs):undefined;
+  Object.defineProperty(window,'_fs',{configurable:true,get(){return cur;},set(v){cur=audWrap(v);}});
+})();
+// Edit Part form: stock typed here counts as an edit; show who changed the part last
+(function(){
+  const os=window.savePart; if(typeof os==='function') window.savePart=async function(){ audCtx='edit'; try{ return await os.apply(this,arguments); }finally{ audCtx=null; } };
+  const sb=document.querySelector('#m-part .sub-btn[onclick="savePart()"]');
+  if(sb&&!document.getElementById('f-lastupd')){ const d=document.createElement('div'); d.id='f-lastupd'; d.style.display='none'; sb.parentNode.insertBefore(d,sb); }
+  const oe=window.openEdit; if(typeof oe==='function') window.openEdit=function(id){ const r=oe.apply(this,arguments); audShowLast(id); return r; };
+  const oa=window.openAdd; if(typeof oa==='function') window.openAdd=function(){ const r=oa.apply(this,arguments); const el=document.getElementById('f-lastupd'); if(el) el.style.display='none'; return r; };
+})();
+function audFmt(ms){ return new Date(ms).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+function audShowLast(id){
+  const el=document.getElementById('f-lastupd'); if(!el) return;
+  const p=(typeof parts!=='undefined'?parts:[]).find(x=>String(x.id)===String(id)); if(!p){ el.style.display='none'; return; }
+  const ms=p.lastAt||(p.updatedAt&&typeof p.updatedAt.toMillis==='function'?p.updatedAt.toMillis():typeof p.updatedAt==='number'?p.updatedAt:0);
+  const can=audCanView();
+  el.innerHTML=(ms?'Last updated <b>'+audFmt(ms)+'</b>'+(p.lastBy?' by <b>'+supEsc(p.lastBy)+'</b>':''):'No change recorded yet')+(can?`<a href="#" onclick="audOpenFor('${supEsc(String(p.code||p.name).replace(/'/g,''))}');return false">View history ›</a>`:'');
+  el.style.display='';
+}
+function audCanView(){ return !!(typeof currentUser!=='undefined'&&currentUser&&AUD_VIEW_ROLES.includes(currentUser.role)); }
+function audOpenFor(q){ closeM('m-part'); document.getElementById('aud-q').value=q; document.getElementById('aud-type').value=''; openAudit(); }
+async function openAudit(){
+  if(!audCanView()){ toast('Only admin and manager can view the audit trail'); return; }
+  document.getElementById('m-aud').classList.add('open');
+  const body=document.getElementById('aud-body');
+  body.innerHTML='<div class="empty" style="padding:24px 0">Loading...</div>';
+  const days=Number(document.getElementById('aud-days').value)||30, since=Date.now()-days*864e5;
+  try{
+    const F=window._fs, col=F.collection(F.db,'auditLog');
+    const q=F.where&&F.limit?F.query(col,F.where('at','>=',since),F.orderBy('at','desc'),F.limit(2000)):F.query(col,F.orderBy('at','desc'));
+    const s=await F.getDocs(q);
+    audRows=s.docs.map(d=>({...d.data(),id:d.id})).filter(r=>r.at>=since).sort((a,b)=>b.at-a.at);
+  }catch(e){ body.innerHTML='<div class="empty" style="padding:24px 0">Could not load the audit trail: '+supEsc(e.code||e.message)+'</div>'; return; }
+  audRender();
+}
+function audFiltered(){
+  const q=supKey(document.getElementById('aud-q').value), t=document.getElementById('aud-type').value;
+  return audRows.filter(r=>(!t||r.type===t)&&(!q||supKey([r.user,r.role,r.action,r.target,r.code,r.details,(r.changes||[]).map(c=>c.f+' '+c.from+' '+c.to).join(' ')].join(' ')).includes(q)));
+}
+function audChanges(r){ return (r.changes||[]).map(c=>`${supEsc(AUD_LABEL[c.f]||c.f)}: ${c.from!==''?'<s>'+supEsc(c.from)+'</s> → ':''}<b>${supEsc(c.to===''?'(blank)':c.to)}</b>`).join('<br>'); }
+function audCls(r){ return /added|request$/i.test(r.action)?'add':/deleted|removed|disabled|rejected/i.test(r.action)?'del':r.type==='stock'?'stk':r.type==='user'?'usr':''; }
+function audRender(){
+  const list=audFiltered(), body=document.getElementById('aud-body');
+  if(!audRows.length){ body.innerHTML='<div class="empty" style="padding:24px 0">No changes recorded in this period.</div><div class="aud-note">Changes are recorded from the day this feature was switched on.</div>'; return; }
+  body.innerHTML=`<div class="aud-wrap"><table><tr><th>Date / time</th><th>User</th><th>Action</th><th>Item</th><th>Details</th></tr>
+    ${list.slice(0,500).map(r=>`<tr><td class="t">${audFmt(r.at)}</td><td>${supEsc(r.user)}<div style="font-size:11px;color:var(--text3)">${supEsc(r.role)}</div></td><td><span class="aud-act ${audCls(r)}">${supEsc(r.action)}</span></td><td>${supEsc(r.target)}${r.code?'<div style="font-size:11px;color:var(--text3)">'+supEsc(r.code)+'</div>':''}</td><td class="aud-ch">${supEsc(r.details)}${r.details&&(r.changes||[]).length?'<br>':''}${audChanges(r)}</td></tr>`).join('')}
+  </table></div><div class="aud-note">${list.length} change(s)${list.length>500?' — showing the latest 500, use search or Export Excel for all':''}. Entries cannot be edited or deleted.</div>`;
+}
+function exportAudit(){
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
+  const rows=audFiltered().map(r=>[new Date(r.at).toLocaleString('en-GB'),r.user||'',r.role||'',r.action||'',r.target||'',r.code||'',r.details||'',(r.changes||[]).map(c=>(AUD_LABEL[c.f]||c.f)+': '+(c.from!==''?c.from+' -> ':'')+c.to).join('; ')]);
+  const wb=XLSX.utils.book_new(), ws=XLSX.utils.aoa_to_sheet([['Date / time','User','Role','Action','Item','Code','Details','Changes'],...rows]);
+  ws['!cols']=[{wch:20},{wch:18},{wch:11},{wch:18},{wch:40},{wch:14},{wch:30},{wch:60}];
+  XLSX.utils.book_append_sheet(wb,ws,'Audit Trail');
+  XLSX.writeFile(wb,'SpareTrack_Audit_Trail_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Audit trail exported ✓');
+}
+document.getElementById('m-aud').addEventListener('click',e=>{if(e.target===document.getElementById('m-aud'))closeM('m-aud');});
+// Menu entry for admin / manager (added after sign-in, since the role is known only then)
+(function(){
+  function addNav(){
+    const nav=document.querySelector('.nav'); if(!nav) return;
+    let b=document.getElementById('nav-aud');
+    if(!b){ b=document.createElement('button'); b.className='nav-btn'; b.id='nav-aud'; b.onclick=openAudit;
+      b.innerHTML='<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>Audit Trail';
+      const h=document.getElementById('nav-help'); h?nav.insertBefore(b,h):nav.appendChild(b); }
+    b.style.display=audCanView()?'':'none';
+  }
+  addNav(); setInterval(addNav,3000);
+})();
+</script>
