@@ -25,6 +25,7 @@ tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
 tools/e2e-life.mjs       Part Lifespan + Budget (20 checks)
 tools/e2e-pm.mjs         PM Schedule + VELOXA import (15 checks)
+tools/e2e-modules.mjs    Stock Valuation, PDF, Suppliers, Audit Trail
 tools/e2e-v1-users.mjs   old app (../sparetrack): disable / enable a user (10 checks)
 tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (17 checks)
 tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
@@ -149,6 +150,13 @@ OUTs (average / min / max), **estimated use per year** (qty after the first OUT 
 OUT; OUTs on the same day count once; stocktake adjustments are ignored. Needs 2+ OUTs. Opening it
 loads the full transaction history once (it is cached after that). Export Excel included.
 Test: `npm run e2e:life`.
+
+## Stock Valuation
+
+KPI card **Stock Value** on Inventory (stock × Unit Cost, with ↑/↓ % vs 30 days ago, worked out from the
+IN/OUT since then) and **Reports → Stock Valuation**: total value, **dead stock** (in stock, no OUT for
+6 / 12 / 24 months), **above max** value, breakdown by category / location / supplier, most valuable
+stock, parts without a Unit Cost flagged, Excel export.
 
 ## Spare Part Budget
 

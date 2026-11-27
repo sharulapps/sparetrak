@@ -4902,7 +4902,7 @@ document.getElementById('m-pm').addEventListener('click',e=>{if(e.target===docum
 #m-bud .bud-tile span{font-size:11.5px;color:var(--text2)}
 #m-bud .bud-sec{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);margin:14px 0 6px}
 #m-bud .bud-bar{height:8px;border-radius:6px;background:var(--bg2);overflow:hidden;margin-top:4px}
-#m-bud .bud-bar i{display:block;height:100%;background:linear-gradient(90deg,#1B3A6B,#C9A24E)}
+#m-bud .bud-bar i{display:block;height:100%;background:linear-gradient(90deg,#2563EB,#60A5FA)}
 #m-bud .bud-row{display:flex;justify-content:space-between;gap:10px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:13px;align-items:flex-start}
 #m-bud .bud-row .n{min-width:0}
 #m-bud .bud-row .n small{display:block;font-size:11.5px;color:var(--text2);margin-top:2px}
@@ -5289,5 +5289,159 @@ body{ background:#F4F7FC!important; color:var(--text) }
   }
   clock(); setInterval(clock,30000); window.addEventListener('online',clock); window.addEventListener('offline',clock);
   setInterval(uiRefresh,2000); uiRefresh();
+})();
+</script>
+
+<!-- ═══ STOCK VALUATION: value of stock on hand (qty × unit cost) ═══ -->
+<style>
+#m-val{z-index:1050}
+#m-val .bud-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px}
+#m-val .bud-tile{border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--bg)}
+#m-val .bud-tile small{display:block;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text3)}
+#m-val .bud-tile b{display:block;font-size:20px;margin-top:4px;color:var(--navy,#0A1628)}
+#m-val .bud-tile span{font-size:11.5px;color:var(--text2)}
+#m-val .bud-sec{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);margin:14px 0 6px}
+#m-val .bud-bar{height:8px;border-radius:6px;background:var(--bg2);overflow:hidden;margin-top:4px}
+#m-val .bud-bar i{display:block;height:100%;background:linear-gradient(90deg,#2563EB,#60A5FA)}
+#m-val .bud-row{display:flex;justify-content:space-between;gap:10px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:13px;align-items:flex-start}
+#m-val .bud-row .n{min-width:0}
+#m-val .bud-row .n small{display:block;font-size:11.5px;color:var(--text2);margin-top:2px}
+#m-val .bud-row .v{text-align:right;white-space:nowrap;font-weight:700}
+#m-val .bud-row .v small{display:block;font-size:11px;font-weight:500;color:var(--text3)}
+#m-val .bud-warn{font-size:12px;padding:9px 11px;border-radius:10px;background:var(--amber-bg,#FEF3C7);color:var(--amber-text,#92400E);margin-bottom:10px}
+#m-val .sheet{max-width:860px;max-height:92vh}
+.kpi.k-value .kpi-ico{ background:linear-gradient(135deg,#34D399,#10B981) }
+.kpi .k-trend{ font-size:11.5px; font-weight:700; margin-left:4px }
+.kpi .k-trend.up{ color:#059669 } .kpi .k-trend.down{ color:#DC2626 }
+@media (min-width:1024px){ .kpi-grid{ grid-template-columns:repeat(5,minmax(0,1fr))!important } .kpi b{ font-size:26px!important } }
+@media (max-width:1023px){ .kpi.k-value{ grid-column:1 / -1 } }
+</style>
+<div class="overlay" id="m-val">
+<div class="sheet" style="padding-bottom:24px">
+  <div class="sheet-title">
+    <span>Stock Valuation</span>
+    <button class="close" aria-label="Close" onclick="closeM('m-val')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Value of the stock on the shelf today = stock × Unit Cost. Dead stock = not taken OUT for the chosen period. Over max = stock above Max Stock.</div>
+  <div class="bud-ctl" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <select id="val-group" onchange="renderVal()" style="flex:1 1 150px;min-width:0;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-family:inherit;font-size:13px"><option value="cat">By category</option><option value="loc">By location</option><option value="supplier">By supplier</option></select>
+    <select id="val-dead" onchange="renderVal()" style="flex:1 1 150px;min-width:0;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-family:inherit;font-size:13px"><option value="180">Dead stock: no OUT for 6 months</option><option value="365" selected>Dead stock: no OUT for 12 months</option><option value="730">Dead stock: no OUT for 24 months</option></select>
+    <button class="act" onclick="exportVal()" style="justify-content:center;padding:9px 12px">Export Excel</button>
+  </div>
+  <div id="val-body"></div>
+</div>
+</div>
+<script>
+// Stock 30 days ago = stock now − IN/RETURN + OUT since then (edits of the stock figure are not movements)
+function valMovedSince(txns,fromMs){
+  const m={};
+  for(const t of txns){
+    const d=typeof lifeDay==='function'?lifeDay(t):Date.parse(t.date);
+    if(!(d>=fromMs)) continue;
+    const q=Number(t.qty)||0, s=(t.type==='in'||t.type==='return')?q:t.type==='out'?-q:0;
+    m[t.partId]=(m[t.partId]||0)+s;
+  }
+  return m;
+}
+function computeValuation(txns,today,deadDays){
+  const lastOut={};
+  for(const t of txns){ if(t.type!=='out'||t.user==='Stocktake') continue; const d=lifeDay(t); if(!(d<=today+LIFE_DAY)) continue; if(!(lastOut[t.partId]>=d)) lastOut[t.partId]=d; }
+  const rows=parts.map(p=>{
+    const qty=Math.max(0,Number(p.qty)||0), cost=Number(p.cost)||0, max=Number(p.max)||0;
+    const lo=lastOut[String(p.id)]??lastOut[p.id];
+    const idle=lo==null?null:Math.floor((today-lo)/LIFE_DAY);
+    return {id:String(p.id),name:p.name,code:p.code||'',cat:p.cat||'',loc:p.loc||'',supplier:p.supplier||'',unit:p.unit||'',qty,cost,value:qty*cost,
+      over:max>0&&qty>max?(qty-max)*cost:0,overQty:max>0&&qty>max?qty-max:0,lastOut:lo??null,idle,
+      dead:qty>0&&(lo==null||idle>=deadDays),noCost:qty>0&&!cost};
+  });
+  return rows;
+}
+// Total value now and 30 days ago, for the KPI card
+function stockValueTrend(){
+  const ps=typeof parts!=='undefined'?parts:[], tx=typeof transactions!=='undefined'?transactions:[];
+  const now=ps.reduce((a,p)=>a+Math.max(0,Number(p.qty)||0)*(Number(p.cost)||0),0);
+  const today=lifeToday(), moved=valMovedSince(tx,today-30*LIFE_DAY);
+  const then=ps.reduce((a,p)=>a+Math.max(0,(Number(p.qty)||0)-(moved[String(p.id)]||0))*(Number(p.cost)||0),0);
+  return {now,then,diff:now-then};
+}
+let valRows=[];
+async function openVal(){
+  document.getElementById('m-val').classList.add('open');
+  document.getElementById('val-body').innerHTML='<div class="empty" style="padding:24px 0">Loading...</div>';
+  if(typeof ensureTxnFrom==='function'){ try{ await ensureTxnFrom(''); }catch(e){} }
+  renderVal();
+}
+function renderVal(){
+  const dead=Number(document.getElementById('val-dead').value)||365, today=lifeToday();
+  const rows=computeValuation(typeof transactions!=='undefined'?transactions:[],today,dead).filter(r=>r.qty>0);
+  valRows=rows.slice().sort((a,b)=>b.value-a.value);
+  const sum=(list,k)=>list.reduce((a,r)=>a+r[k],0);
+  const total=sum(rows,'value'), deadRows=rows.filter(r=>r.dead).sort((a,b)=>b.value-a.value), overRows=rows.filter(r=>r.over>0).sort((a,b)=>b.over-a.over);
+  const noCost=rows.filter(r=>r.noCost), tr=stockValueTrend();
+  const key=document.getElementById('val-group').value, label={cat:'category',loc:'location',supplier:'supplier'}[key];
+  const g={}; rows.forEach(r=>{ const k=r[key]||'(no '+label+')'; g[k]=(g[k]||0)+r.value; });
+  const gl=Object.entries(g).sort((a,b)=>b[1]-a[1]), top=gl.length?gl[0][1]:0;
+  const line=r=>`<div class="bud-row"><div class="n"><b>${lifeEsc(r.name)}</b><small>${lifeEsc(r.code||'-')} · ${r.qty} ${lifeEsc(r.unit)} × ${budRM(r.cost)}${r.lastOut!=null?' · last OUT '+lifeFmt(r.lastOut):' · never taken OUT'}</small></div><div class="v">${budRM(r.value)}</div></div>`;
+  document.getElementById('val-body').innerHTML=`
+    <div class="bud-tiles">
+      <div class="bud-tile"><small>Stock value</small><b>${budRM(total)}</b><span>${tr.diff>=0?'▲':'▼'} ${budRM(Math.abs(tr.diff))} vs 30 days ago</span></div>
+      <div class="bud-tile"><small>Dead stock</small><b style="color:#B91C1C">${budRM(sum(deadRows,'value'))}</b><span>${deadRows.length} part(s), no OUT ${dead>=365?dead/365+' yr':'6 months'}</span></div>
+      <div class="bud-tile"><small>Over max</small><b style="color:#5B3CC4">${budRM(sum(overRows,'over'))}</b><span>${overRows.length} part(s) above Max Stock</span></div>
+      <div class="bud-tile"><small>Parts in stock</small><b>${rows.length}</b><span>${sum(rows,'qty').toLocaleString('en-MY')} units</span></div>
+    </div>
+    ${noCost.length?`<div class="bud-warn">⚠ ${noCost.length} part(s) in stock have no Unit Cost, so they count as RM 0. Add the cost in Edit Part.</div>`:''}
+    <div class="bud-sec">By ${label}</div>
+    ${gl.slice(0,12).map(([k,v])=>`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px"><span>${lifeEsc(k)}</span><b>${budRM(v)}${total?` <span style="font-weight:500;color:var(--text3);font-size:11px">${Math.round(v/total*100)}%</span>`:''}</b></div><div class="bud-bar"><i style="width:${top?Math.max(2,v/top*100):0}%"></i></div></div>`).join('')}
+    <div class="bud-sec">Dead stock — money sitting on the shelf</div>
+    ${deadRows.length?deadRows.slice(0,30).map(line).join(''):'<div class="empty" style="padding:10px 0">None 👍</div>'}
+    <div class="bud-sec">Above Max Stock</div>
+    ${overRows.length?overRows.slice(0,30).map(r=>`<div class="bud-row"><div class="n"><b>${lifeEsc(r.name)}</b><small>${lifeEsc(r.code||'-')} · ${r.overQty} ${lifeEsc(r.unit)} above max</small></div><div class="v">${budRM(r.over)}</div></div>`).join(''):'<div class="empty" style="padding:10px 0">None</div>'}
+    <div class="bud-sec">Most valuable stock</div>
+    ${valRows.slice(0,20).map(line).join('')}`;
+}
+function exportVal(){
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded yet, try again'); return; }
+  const head=['Part','Code','Category','Location','Supplier','Unit','Stock','Unit cost (RM)','Value (RM)','Above max (RM)','Last OUT','Days since OUT','Dead stock'];
+  const rows=valRows.map(r=>[r.name,r.code,r.cat,r.loc,r.supplier,r.unit,r.qty,r.noCost?'':r.cost,Math.round(r.value*100)/100,Math.round(r.over*100)/100,r.lastOut!=null?lifeFmt(r.lastOut):'never',r.idle??'',r.dead?'YES':'']);
+  const tot=['TOTAL','','','','','',valRows.reduce((a,r)=>a+r.qty,0),'',Math.round(valRows.reduce((a,r)=>a+r.value,0)*100)/100,Math.round(valRows.reduce((a,r)=>a+r.over,0)*100)/100,'','',''];
+  const wb=XLSX.utils.book_new(), ws=XLSX.utils.aoa_to_sheet([head,...rows,[],tot]);
+  ws['!cols']=[{wch:36},{wch:14},{wch:16},{wch:12},{wch:22},{wch:7},{wch:7},{wch:11},{wch:12},{wch:12},{wch:12},{wch:9},{wch:9}];
+  XLSX.utils.book_append_sheet(wb,ws,'Stock Valuation');
+  XLSX.writeFile(wb,'SpareTrack_Stock_Valuation_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Stock valuation exported ✓');
+}
+document.getElementById('m-val').addEventListener('click',e=>{if(e.target===document.getElementById('m-val'))closeM('m-val');});
+(function(){
+  // Reports button
+  const rpt=document.getElementById('rpt');
+  if(rpt&&!document.getElementById('val-open')){
+    const b=document.createElement('button'); b.id='val-open'; b.className='life-open-btn'; b.onclick=openVal;
+    b.innerHTML='<span style="font-size:22px">📦</span><span><b style="font-size:14px">Stock Valuation</b><br><span style="font-size:12px;color:var(--text2)">Value of stock on hand · dead stock · above max</span></span>';
+    const life=document.getElementById('life-open');
+    life?rpt.insertBefore(b,life):rpt.appendChild(b);
+  }
+  // KPI card "Stock Value" (opens the valuation)
+  const g=document.getElementById('kpi-grid');
+  if(g&&!document.getElementById('kpi-value')){
+    const k=document.createElement('button'); k.type='button'; k.className='kpi k-value'; k.onclick=openVal;
+    k.innerHTML='<div class="kpi-ico"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div style="min-width:0"><small>Stock Value</small><b id="kpi-value">RM 0</b><span class="k-sub" id="kpi-value-s"></span></div>';
+    g.appendChild(k);
+  }
+  function upd(){
+    try{
+      const e=document.getElementById('kpi-value'); if(!e) return;
+      const t=stockValueTrend();
+      e.textContent='RM '+Math.round(t.now).toLocaleString('en-MY');
+      const s=document.getElementById('kpi-value-s');
+      const pct=t.then>0?Math.round((t.diff/t.then)*1000)/10:null;
+      s.innerHTML=pct==null||!isFinite(pct)?'on the shelf':`<span class="k-trend ${t.diff>=0?'up':'down'}">${t.diff>=0?'↑':'↓'} ${Math.abs(pct)}%</span> vs 30 days ago`;
+    }catch(e){}
+  }
+  if(typeof window.renderParts==='function'&&!window.renderParts._val){
+    const orig=window.renderParts;
+    window.renderParts=function(){ const r=orig.apply(this,arguments); upd(); return r; };
+    window.renderParts._val=true;
+  }
+  setInterval(upd,3000); upd();
 })();
 </script>
