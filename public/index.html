@@ -5009,3 +5009,286 @@ document.getElementById('m-bud').addEventListener('click',e=>{if(e.target===docu
   after&&after.nextSibling?rpt.insertBefore(b,after.nextSibling):rpt.appendChild(b);
 })();
 </script>
+
+<!-- ═══ ENTERPRISE UI THEME (look only — no app logic changes) ═══
+     Colours: navy #0B1F3A · royal blue #2563EB · page #F4F7FC · success #10B981 · warning #F59E0B
+     Font: Inter. Desktop (>=1024px): navy sidebar + top bar + table-style part list.
+     Phone/tablet: same pages, cleaner cards. Everything here only re-styles or reads
+     existing data (parts, alerts) and calls existing functions (setFilter, tab, doLogout, openAdd). -->
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+:root{
+  --navy:#0B1F3A; --navy2:#10294B; --navy3:#16335C;
+  --blue:#2563EB; --blue2:#2563EB; --blue3:#3B82F6; --blue-bg:#EFF4FF; --blue-text:#1D4ED8;
+  --bg:#FFFFFF; --bg2:#F4F7FC; --bg3:#E9EEF6; --surface:#FFFFFF;
+  --text:#0B1F3A; --text2:#475569; --text3:#8292A8;
+  --border:#E3E9F2; --border2:#D6DEEA; --border3:#BFCBDC;
+  --green:#10B981; --green-bg:#ECFDF5; --green-t:#047857; --green-text:#047857;
+  --amber:#F59E0B; --amber-bg:#FFF7E6; --amber-t:#B45309; --amber-text:#B45309;
+  --red:#EF4444; --red-bg:#FEF2F2; --red-t:#B91C1C; --red-text:#B91C1C;
+  --gold:#2563EB; --gold2:#93B4F5;
+  --shadow-sm:0 1px 2px rgba(11,31,58,.04),0 1px 3px rgba(11,31,58,.06);
+  --shadow:0 4px 14px rgba(11,31,58,.07);
+  --shadow-lg:0 12px 32px rgba(11,31,58,.10);
+  --radius:10px; --radius-lg:14px;
+  --side:252px;
+}
+html,body,button,input,select,textarea{ font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif }
+body{ background:#F4F7FC!important; color:var(--text) }
+.app-wrap{ background:var(--bg2)!important; box-shadow:none!important }
+.app-wrap .header{ background:#fff; border-bottom:1px solid var(--border) }
+.app-wrap .logo-icon{ background:linear-gradient(135deg,#2563EB,#1D4ED8)!important; box-shadow:0 6px 14px rgba(37,99,235,.28) }
+.app-wrap .logo-name{ color:var(--navy); font-weight:800; letter-spacing:-.4px }
+.app-wrap .logo-name::after{ display:none!important }
+.app-wrap .logo-tenant{ color:var(--blue)!important }
+.app-wrap .add-btn, .app-wrap .sub-btn, .sheet .sub-btn{ background:var(--blue)!important; box-shadow:0 6px 16px rgba(37,99,235,.25)!important; border-radius:10px }
+.app-wrap .add-btn:hover, .app-wrap .sub-btn:hover, .sheet .sub-btn:hover{ background:#1D4ED8!important }
+.sync-bar{ background:#ECFDF5; border-bottom:1px solid #D1FAE5; color:#047857 }
+/* tabs (phone / tablet) */
+.app-wrap .nav{ background:#fff; border-bottom:1px solid var(--border) }
+.app-wrap .nav-btn{ color:var(--text3); font-weight:600 }
+.app-wrap .nav-btn.active{ color:var(--blue); border-bottom-color:var(--blue) }
+.app-wrap .nav-btn.active svg{ stroke:var(--blue) }
+/* inputs, filters, cards */
+.app-wrap .search-wrap input{ background:#fff; border:1px solid var(--border2); border-radius:12px; height:44px; box-shadow:var(--shadow-sm) }
+.app-wrap .search-wrap input:focus{ border-color:var(--blue); box-shadow:0 0 0 4px rgba(37,99,235,.12) }
+.app-wrap .filter-btn, .app-wrap .dup-btn{ background:#fff; border:1px solid var(--border2); border-radius:10px; color:var(--text2); text-transform:none; letter-spacing:0; font-weight:600 }
+.app-wrap .filter-btn.on{ background:var(--navy)!important; color:#fff; border-color:var(--navy) }
+.app-wrap .part-card{ background:#fff; border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow-sm) }
+.app-wrap .part-card:hover{ border-color:#C7D6F5; box-shadow:var(--shadow) }
+.app-wrap .pname{ color:var(--navy); font-weight:700 }
+.app-wrap .pcode{ font-family:inherit; color:var(--text3) }
+.app-wrap .badge{ border-radius:8px; letter-spacing:.2px; font-size:10.5px; padding:4px 9px }
+.app-wrap .b-ok{ background:#ECFDF5; color:#047857 } .app-wrap .b-low{ background:#FEF2F2; color:#B91C1C }
+.app-wrap .b-mid{ background:#FFF7E6; color:#B45309 } .app-wrap .b-over{ background:#F1EDFF; color:#5B3CC4 }
+.app-wrap .act{ border:1px solid var(--border2); border-radius:9px; text-transform:none; letter-spacing:0; font-weight:600; background:#fff }
+.app-wrap .act.in{ background:#ECFDF5; border-color:#A7F3D0; color:#047857 }
+.app-wrap .act.out{ background:#FFF7E6; border-color:#FDE1A8; color:#B45309 }
+.app-wrap .stat{ background:#fff; border:1px solid var(--border); box-shadow:var(--shadow-sm) }
+.app-wrap .stat::before{ background:linear-gradient(90deg,var(--blue),transparent) }
+.app-wrap .sec-label{ color:var(--text3); font-weight:700 }
+.app-wrap .exp-btn, .life-open-btn{ background:#fff; border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow-sm) }
+.app-wrap .txn-item, .app-wrap .alert-card{ background:#fff; border:1px solid var(--border); border-radius:12px }
+/* modals: white, royal blue accents */
+.overlay{ background:rgba(11,31,58,.45)!important }
+.sheet::after{ background:linear-gradient(90deg,transparent,var(--blue),transparent)!important; opacity:.6 }
+.sheet .fg input:focus, .sheet .fg select:focus, .sheet .fg textarea:focus{ border-color:var(--blue)!important; box-shadow:0 0 0 4px rgba(37,99,235,.12)!important }
+.toast{ background:var(--navy)!important; border:1px solid rgba(255,255,255,.08)!important }
+
+/* page heading + KPI cards (all sizes) */
+.pg-head{ display:flex; align-items:center; gap:14px; margin:2px 0 18px }
+.pg-ico{ width:48px; height:48px; border-radius:14px; background:linear-gradient(135deg,#2563EB,#1D4ED8); display:flex; align-items:center; justify-content:center; box-shadow:0 8px 18px rgba(37,99,235,.28); flex-shrink:0 }
+.pg-ico svg{ width:24px; height:24px; stroke:#fff; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
+.pg-head h1{ margin:0; font-size:22px; font-weight:800; letter-spacing:-.6px; color:var(--navy) }
+.pg-head p{ margin:3px 0 0; font-size:13px; color:var(--text2) }
+.kpi-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:16px }
+.kpi{ display:flex; align-items:center; gap:12px; padding:14px; background:#fff; border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow-sm); cursor:pointer; text-align:left; font-family:inherit; transition:.15s; min-width:0 }
+.kpi:hover{ transform:translateY(-1px); box-shadow:var(--shadow) }
+.kpi.on{ outline:2px solid var(--blue); outline-offset:-1px }
+.kpi-ico{ width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0 }
+.kpi-ico svg{ width:20px; height:20px; stroke:#fff; fill:none; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round }
+.kpi small{ display:block; font-size:12px; color:var(--text2); font-weight:600 }
+.kpi b{ display:block; font-size:24px; font-weight:800; letter-spacing:-.6px; color:var(--navy); line-height:1.15 }
+.kpi span.k-sub{ font-size:11px; color:var(--text3) }
+.kpi.k-total .kpi-ico{ background:linear-gradient(135deg,#3B82F6,#2563EB) }
+.kpi.k-low .kpi-ico{ background:linear-gradient(135deg,#F87171,#EF4444) }
+.kpi.k-near .kpi-ico{ background:linear-gradient(135deg,#FBBF24,#F59E0B) }
+.kpi.k-over .kpi-ico{ background:linear-gradient(135deg,#A78BFA,#7C3AED) }
+.parts-thead{ display:none }
+
+/* ── Desktop: navy sidebar, top bar, table-style list ── */
+@media (min-width:1024px){
+  body{ padding:0!important; display:block!important }
+  .app-wrap{ max-width:none!important; width:100%; min-height:100vh!important; border-radius:0!important; overflow:visible!important;
+    background:linear-gradient(90deg,var(--navy) var(--side),var(--bg2) var(--side))!important }
+  .app-wrap:not([style*="none"]){ display:grid!important; grid-template-columns:var(--side) minmax(0,1fr)!important; grid-template-rows:64px auto 1fr!important }
+  .app-wrap > .sync-bar{ display:none!important }
+  .app-wrap > #side-brand{ grid-column:1; grid-row:1; display:flex }
+  .app-wrap > #logout-bar{ grid-column:1!important; grid-row:2!important; display:flex!important; background:transparent!important; border:none!important; padding:6px 16px 14px!important; flex-direction:column; align-items:stretch!important; gap:10px }
+  .app-wrap > .nav{ grid-column:1!important; grid-row:3!important; background:transparent!important; border:none!important; padding:6px 14px 24px!important; position:sticky!important; top:0!important; min-height:0!important; align-self:start; backdrop-filter:none!important }
+  .app-wrap > .header{ grid-column:2!important; grid-row:1!important; position:sticky; top:0; z-index:30; height:64px; box-sizing:border-box; padding:0 28px!important; background:var(--navy)!important; border-bottom:1px solid rgba(255,255,255,.06); color:#fff }
+  .app-wrap > .section{ grid-column:2!important; grid-row:2 / span 2!important; padding:26px 32px 40px!important }
+  /* header becomes the top bar */
+  .app-wrap > .header .logo{ display:none }
+  .app-wrap > .header #user-badge{ display:none!important }
+  #top-status{ display:flex!important }
+  #top-right{ display:flex!important }
+  /* sidebar */
+  #side-brand{ align-items:center; gap:11px; padding:0 22px; height:64px; color:#fff }
+  #side-brand .sb-ico{ width:38px; height:38px; border-radius:11px; background:linear-gradient(135deg,#3B82F6,#2563EB); display:flex; align-items:center; justify-content:center; box-shadow:0 6px 16px rgba(37,99,235,.45) }
+  #side-brand .sb-ico svg{ width:21px; height:21px; stroke:#fff; fill:none; stroke-width:2 }
+  #side-brand b{ font-size:19px; font-weight:800; letter-spacing:-.5px }
+  #side-brand b span{ color:#60A5FA }
+  #side-brand small{ display:block; font-size:10.5px; color:rgba(255,255,255,.55); letter-spacing:.2px; max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  #logout-bar #logout-bar-name{ display:none }
+  #side-user{ display:flex!important; align-items:center; gap:11px; padding:12px; border-radius:14px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08) }
+  #side-user .su-av{ width:40px; height:40px; border-radius:50%; background:linear-gradient(135deg,#60A5FA,#2563EB); display:flex; align-items:center; justify-content:center; font-weight:800; color:#fff; font-size:14px; flex-shrink:0 }
+  #side-user b{ display:block; color:#fff; font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:150px }
+  #side-user small{ color:rgba(255,255,255,.55); font-size:11.5px; text-transform:capitalize }
+  #logout-bar #btn-logout{ justify-content:center; color:rgba(255,255,255,.75)!important; border-color:rgba(255,255,255,.14)!important; background:transparent!important }
+  #logout-bar #btn-logout:hover{ background:rgba(255,255,255,.08)!important; color:#fff!important }
+  .app-wrap .nav-btn{ flex-direction:row!important; justify-content:flex-start!important; gap:14px!important; width:100%; padding:12px 16px!important; margin-bottom:3px; border-radius:11px!important; border:none!important;
+    color:rgba(255,255,255,.72)!important; font-size:14px!important; font-weight:600!important; letter-spacing:0!important; text-transform:none!important; background:transparent!important; box-shadow:none!important }
+  .app-wrap .nav-btn svg{ stroke:rgba(255,255,255,.72)!important; width:20px!important; height:20px!important }
+  .app-wrap .nav-btn:hover{ background:rgba(255,255,255,.07)!important; color:#fff!important }
+  .app-wrap .nav-btn.active{ background:var(--blue)!important; color:#fff!important; box-shadow:0 8px 20px rgba(37,99,235,.35)!important }
+  .app-wrap .nav-btn.active svg{ stroke:#fff!important }
+  .app-wrap .nav-btn span[id$="badge"]{ display:none!important }
+  .app-wrap .nav-btn .nav-count{ display:inline-flex; margin-left:auto; min-width:22px; height:22px; border-radius:11px; background:#EF4444; color:#fff; font-size:11px; font-style:normal; font-weight:700; align-items:center; justify-content:center; padding:0 6px; box-sizing:border-box }
+  .app-wrap .nav-btn .nav-count:empty{ display:none }
+  /* top bar */
+  #top-status{ align-items:center; gap:10px; font-size:13.5px; color:rgba(255,255,255,.9); font-weight:500 }
+  #top-status i{ width:10px; height:10px; border-radius:50%; background:#10B981; box-shadow:0 0 0 4px rgba(16,185,129,.18) }
+  #top-status.off i{ background:#F59E0B; box-shadow:0 0 0 4px rgba(245,158,11,.18) }
+  #top-right{ align-items:center; gap:14px }
+  #top-bell{ position:relative; background:none; border:none; cursor:pointer; padding:6px; color:#fff }
+  #top-bell svg{ width:22px; height:22px; stroke:#fff; fill:none; stroke-width:2 }
+  #top-bell em{ position:absolute; top:-1px; right:-2px; min-width:18px; height:18px; border-radius:9px; background:#EF4444; color:#fff; font-size:10.5px; font-style:normal; font-weight:700; display:flex; align-items:center; justify-content:center; padding:0 4px; box-sizing:border-box }
+  #top-bell em:empty{ display:none }
+  #top-av{ width:36px; height:36px; border-radius:10px; background:var(--blue); color:#fff; font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center }
+  .app-wrap > .header .add-btn{ height:40px; padding:0 18px!important; font-size:14px!important; border-radius:10px!important }
+  /* page */
+  .pg-head h1{ font-size:28px; letter-spacing:-.8px }
+  .pg-head p{ font-size:14px }
+  .pg-ico{ width:56px; height:56px; border-radius:16px }
+  .pg-ico svg{ width:28px; height:28px }
+  .kpi-grid{ grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:18px }
+  .kpi{ padding:18px 20px; gap:16px; border-radius:16px }
+  .kpi-ico{ width:52px; height:52px }
+  .kpi-ico svg{ width:24px; height:24px }
+  .kpi small{ font-size:14px; color:var(--navy) }
+  .kpi b{ font-size:30px }
+  #inv .search-row{ background:#fff; border:1px solid var(--border); border-radius:16px; padding:12px; box-shadow:var(--shadow-sm); gap:10px; margin-bottom:14px }
+  #inv .search-row .search-wrap{ flex:1 1 340px }
+  /* parts as table rows: thumb | part | status | stock | actions */
+  .parts-thead{ display:grid; grid-template-columns:46px minmax(0,1fr) 140px 180px 300px; gap:16px; align-items:center; padding:12px 18px; background:#F8FAFD; border:1px solid var(--border); border-bottom:none; border-radius:16px 16px 0 0; font-size:13px; font-weight:700; color:var(--navy) }
+  #parts-list{ background:#fff; border:1px solid var(--border); border-radius:0 0 16px 16px; overflow:hidden; box-shadow:var(--shadow-sm) }
+  #parts-list .part-card{ display:grid!important; grid-template-columns:46px minmax(0,1fr) 140px 180px 300px; gap:16px; align-items:center;
+    margin:0!important; padding:12px 18px!important; border:none!important; border-bottom:1px solid var(--border)!important; border-radius:0!important; box-shadow:none!important; transform:none!important }
+  #parts-list .part-card:hover{ background:#F8FAFF }
+  #parts-list .part-card.low{ box-shadow:inset 3px 0 0 #EF4444!important } #parts-list .part-card.near{ box-shadow:inset 3px 0 0 #F59E0B!important } #parts-list .part-card.over{ box-shadow:inset 3px 0 0 #7C3AED!important }
+  #parts-list .part-card .pt, #parts-list .part-card .pb{ display:contents!important }
+  #parts-list .part-card .pt > img, #parts-list .part-card .pt > div[onclick^="viewPartImage"]{ grid-column:1; width:44px!important; height:44px!important; border-radius:10px!important }
+  #parts-list .part-card .pt > div:not([onclick]){ grid-column:2; min-width:0 }
+  #parts-list .part-card .pt > .badge{ grid-column:3; justify-self:start }
+  #parts-list .part-card .pmeta{ grid-column:4; font-size:12.5px; line-height:1.5 }
+  #parts-list .part-card .pacts{ grid-column:5; justify-content:flex-end; flex-wrap:nowrap }
+  #parts-list .part-card .pname{ font-size:14.5px }
+  #parts-list > div:not(.part-card){ padding:12px 18px }
+  #parts-list .empty{ border:none }
+}
+/* hidden below desktop */
+#side-brand, #side-user, #top-status, #top-right, .nav-btn .nav-count{ display:none }
+</style>
+<script>
+(function(){
+  const app=document.getElementById('main-app'); if(!app) return;
+  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const ICON={
+    box:'<svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+    swap:'<svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+    bell:'<svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+    chart:'<svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+    check:'<svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+    users:'<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    ok:'<svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    warn:'<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    down:'<svg viewBox="0 0 24 24"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>',
+    up:'<svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
+  };
+  // Sidebar brand (desktop)
+  if(!document.getElementById('side-brand')){
+    const b=document.createElement('div'); b.id='side-brand';
+    b.innerHTML='<div class="sb-ico">'+ICON.box+'</div><div><b>Spare<span>Track</span></b><small id="side-sub">Track · Manage · Maintain</small></div>';
+    app.insertBefore(b,app.firstChild);
+  }
+  // User card above the menu (desktop); the sign-out button stays the same element
+  const lb=document.getElementById('logout-bar');
+  if(lb&&!document.getElementById('side-user')){
+    const u=document.createElement('div'); u.id='side-user';
+    u.innerHTML='<div class="su-av" id="ui-av">?</div><div style="min-width:0"><b id="ui-name">-</b><small id="ui-role"></small></div>';
+    lb.insertBefore(u,lb.firstChild);
+  }
+  // Top bar: status on the left; alerts bell and initials on the right of the header
+  const hd=app.querySelector('.header');
+  if(hd&&!document.getElementById('top-status')){
+    const s=document.createElement('div'); s.id='top-status'; s.innerHTML='<i></i><span id="top-status-t">System online</span>';
+    hd.insertBefore(s,hd.firstChild);
+    const right=hd.lastElementChild;
+    const r=document.createElement('div'); r.id='top-right';
+    r.innerHTML='<button id="top-bell" title="Reorder alerts" type="button">'+ICON.bell+'<em id="top-bell-n"></em></button><div id="top-av" title="">?</div>';
+    right.insertBefore(r,right.firstChild);
+    document.getElementById('top-bell').onclick=()=>{ const b=[...document.querySelectorAll('.nav-btn')].find(x=>/alert/i.test(x.textContent)); if(b) b.click(); };
+  }
+  // Page headings
+  const HEAD={inv:['box','Inventory Management','Manage your spare parts inventory efficiently'],txn:['swap','Transactions','Every stock movement: IN, OUT and returns'],
+    alert:['bell','Reorder Alerts','Parts at low stock or below minimum'],rpt:['chart','Reports','Stock figures, exports and planning tools'],
+    stk:['check','Stocktake','Count the store and correct system stock'],users:['users','User Management','Accounts and roles for your team'],approval:['ok','Approvals','Requests waiting for a decision']};
+  for(const [id,[ic,t,sub]] of Object.entries(HEAD)){
+    const sec=document.getElementById(id); if(!sec||sec.querySelector(':scope > .pg-head')) continue;
+    const h=document.createElement('div'); h.className='pg-head';
+    h.innerHTML='<div class="pg-ico">'+ICON[ic]+'</div><div><h1>'+t+'</h1><p>'+sub+'</p></div>';
+    sec.insertBefore(h,sec.firstChild);
+  }
+  // KPI cards on the inventory page (click = the existing status filter)
+  const inv=document.getElementById('inv'), sr=inv&&inv.querySelector('.search-row');
+  if(sr&&!document.getElementById('kpi-grid')){
+    const g=document.createElement('div'); g.id='kpi-grid'; g.className='kpi-grid';
+    const card=(k,ic,label,f)=>`<button type="button" class="kpi k-${k}" data-f="${f}"><div class="kpi-ico">${ICON[ic]}</div><div style="min-width:0"><small>${label}</small><b id="kpi-${k}">0</b><span class="k-sub" id="kpi-${k}-s"></span></div></button>`;
+    g.innerHTML=card('total','box','Total Parts','all')+card('low','warn','Low Stock','low')+card('near','down','Near Finish','near')+card('over','up','Over Stock','over');
+    sr.parentElement.insertBefore(g,sr);
+    g.querySelectorAll('.kpi').forEach(k=>k.onclick=()=>{ const btn=document.getElementById('f-'+k.dataset.f); if(btn) btn.click(); });
+    // Column titles for the table view (desktop)
+    const list=document.getElementById('parts-list');
+    if(list&&!document.getElementById('parts-thead')){
+      const th=document.createElement('div'); th.id='parts-thead'; th.className='parts-thead';
+      th.innerHTML='<span></span><span>Part Details</span><span>Status</span><span>Stock</span><span style="text-align:right">Action</span>';
+      list.parentElement.insertBefore(th,list);
+    }
+  }
+  function uiRefresh(){
+    try{
+      const ps=typeof parts!=='undefined'?parts:[], st=p=>typeof stockStatus==='function'?stockStatus(p):'ok';
+      const n={total:ps.length,low:0,near:0,over:0}; ps.forEach(p=>{ const s=st(p); if(n[s]!=null) n[s]++; });
+      for(const k in n){ const e=document.getElementById('kpi-'+k); if(e) e.textContent=n[k].toLocaleString('en-MY'); }
+      const s=document.getElementById('kpi-total-s'); if(s) s.textContent=(n.total-n.low)+' in stock';
+      const ls=document.getElementById('kpi-low-s'); if(ls) ls.textContent='out of stock';
+      const ns=document.getElementById('kpi-near-s'); if(ns) ns.textContent='below minimum';
+      const os=document.getElementById('kpi-over-s'); if(os) os.textContent='above maximum';
+      const f=typeof filter!=='undefined'?filter:'all';
+      document.querySelectorAll('#kpi-grid .kpi').forEach(k=>k.classList.toggle('on',k.dataset.f===f&&f!=='all'));
+      const u=typeof currentUser!=='undefined'&&currentUser?currentUser:null;
+      if(u){
+        const name=u.name||u.email||'', ini=name.replace(/\(.*?\)/g,'').trim().split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase()||'?';
+        const set=(id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
+        set('ui-av',ini); set('top-av',ini); set('ui-name',name); set('ui-role',u.role||'');
+        const av=document.getElementById('top-av'); if(av) av.title=name;
+      }
+      const tn=document.getElementById('tenant-name'), sub=document.getElementById('side-sub');
+      if(sub) sub.textContent=(tn&&tn.textContent.trim())||'Track · Manage · Maintain';
+      document.querySelectorAll('.nav-btn span[id$="badge"]').forEach(b=>{
+        let c=b.parentElement.querySelector('.nav-count');
+        if(!c){ c=document.createElement('i'); c.className='nav-count'; b.parentElement.appendChild(c); }
+        c.textContent=(b.textContent.match(/\d+/)||[''])[0];
+      });
+      const ab=document.getElementById('alert-badge'), bn=document.getElementById('top-bell-n');
+      if(bn) bn.textContent=ab?(ab.textContent.match(/\d+/)||[''])[0]:'';
+    }catch(e){}
+  }
+  // Re-draw the cards after the existing list renders (the list function itself is unchanged)
+  if(typeof window.renderParts==='function'&&!window.renderParts._ui){
+    const orig=window.renderParts;
+    window.renderParts=function(){ const r=orig.apply(this,arguments); uiRefresh(); return r; };
+    window.renderParts._ui=true;
+  }
+  function clock(){
+    const t=document.getElementById('top-status-t'), w=document.getElementById('top-status'); if(!t) return;
+    const on=navigator.onLine!==false, d=new Date();
+    t.textContent=(on?'System online':'Offline — changes sync later')+' | '+d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+', '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+    w.classList.toggle('off',!on);
+  }
+  clock(); setInterval(clock,30000); window.addEventListener('online',clock); window.addEventListener('offline',clock);
+  setInterval(uiRefresh,2000); uiRefresh();
+})();
+</script>

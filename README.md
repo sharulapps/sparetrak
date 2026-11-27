@@ -62,6 +62,14 @@ Limits are enforced in `firestore.rules`, so they hold even if someone edits the
   `window._fs.addDoc` picks a free slot automatically; deleting a part frees its slot.
 - **Sign-up:** one free trial per account, fixed limits, the caller becomes its admin.
 
+## Look (enterprise UI)
+
+The last block of `public/index.html` ("ENTERPRISE UI THEME") only restyles and reads data: navy
+#0B1F3A, royal blue #2563EB, page #F4F7FC, success #10B981, warning #F59E0B, font Inter (Google Fonts;
+system font when offline). Desktop (≥1024 px): navy sidebar with company and user card, top bar
+(online status, date, alerts bell, Add Part), page headings, KPI cards (click = status filter) and a
+table-style part list. Phone/tablet: same pages with cards. App logic is unchanged.
+
 ## Scaling (Spark: 50k reads / 20k writes per day)
 
 Firestore bills one read per document returned, so the app avoids re-reading data it already has.

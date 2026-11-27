@@ -4,7 +4,7 @@
     "title": "Getting started",
     "sub": "Sign in and find your way around",
     "roles": "Everyone",
-    "duration": 40
+    "duration": 39
   },
   {
     "id": "02-search",
@@ -74,7 +74,7 @@
     "title": "Manage users",
     "sub": "Add staff and set what they can do",
     "roles": "Admin · Manager",
-    "duration": 29
+    "duration": 30
   },
   {
     "id": "12-check-duplicates",
