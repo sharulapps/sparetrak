@@ -25,6 +25,7 @@ tools/e2e-trial.mjs      free-trial sign-up + plan limits walkthrough (17 checks
 tools/e2e-scale.mjs      cache/delta sync, atomic stock, alerts, batched import (25 checks)
 tools/e2e-life.mjs       Part Lifespan + Budget (20 checks)
 tools/e2e-pm.mjs         PM Schedule + VELOXA import (15 checks)
+tools/e2e-v1-users.mjs   old app (../sparetrack): disable / enable a user (10 checks)
 tools/e2e-label.mjs      Scan Part Label: fake camera + real OCR, QR scanner unchanged (17 checks)
 tools/make-label-fixtures.py  makes tests/fixtures/label-*.mjpeg (fake camera videos)
 tools/build-index.py     one-off: generated public/index.html from sharulapps/sparetrack.
